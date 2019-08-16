@@ -1,0 +1,278 @@
+---
+title: "Network Generation"
+author: "Rnault"
+date: "4/8/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(igraph)
+library(ggraph)
+```
+
+Generating Networks:
+-Random Graph **done
+-Nearest Neighbour **done
+-Small World **done
+-Preferential Attachment **done
+
+Make a fully connected graph:
+```{r}
+MakeFullGraph <- function(N) {
+
+network = matrix(1, N, N)
+
+#to prevent a node to connect to himself
+diag(network) = 0
+
+return(network)
+}
+
+net <- MakeFullGraph(16)
+g = graph_from_adjacency_matrix(net)
+
+#plot
+ggraph(g, layout = 'linear', circular = TRUE) + 
+  geom_edge_link(aes(), show.legend = FALSE) + 
+  geom_node_point()
+
+```
+
+
+-Making a Random Graph with a Matrix
+```{r}
+MakeRandomGraph <- function(N,p,mode = 'undirected') {
+
+network = matrix(rbinom(N*N, 1, p), N)
+
+#to prevent a node to connect to himself
+diag(network) = 0
+
+if (mode =='undirected'){
+network[lower.tri(network)] = t(network)[lower.tri(network)]
+}
+return(network)
+}
+
+net <- MakeRandomGraph(100,0.1)
+g = graph_from_adjacency_matrix(net, mode = 'undirected')
+
+#plot
+ggraph(g, layout = 'nicely') + 
+  geom_edge_link(aes(), show.legend = FALSE) + 
+  geom_node_point()
+
+
+####### DEGREE ########
+
+#list of degree
+degree(g)
+#mean degree
+mean(degree(g))
+dens(degree(g)) #requires rethinking package
+
+######## PATH ##########
+
+#a matrix of shortest path length
+distances(g)
+#mean shortest path
+mean(distances(g))
+#longest shortest path
+diameter(g)
+#looking at the actual path (from node 1 to node 2)
+all_shortest_paths(g, from = 1, to = 2)
+
+######## Clustering #########
+transitivity(g,type = 'average')
+
+
+
+
+g <- random.graph.game(16,0.1)
+
+#plot
+ggraph(g, layout = 'linear', circular = TRUE) + 
+  geom_edge_link(aes(), show.legend = FALSE) + 
+  geom_node_point()
+```
+
+
+Lattice with adjacency matrix
+```{r}
+MakeNNGraph <- function(N,k){
+network = matrix(0,N,N)
+neighbours = k
+
+for (step in 1:neighbours){
+  for (i in 1:(N-step)){
+    network[i,i+step] <- 1
+  }
+  for (i in (N-step+1):N){
+    network[i+step-N,i] <- 1
+  }
+}
+#make it undirected
+network[lower.tri(network)] = t(network)[lower.tri(network)]
+
+return(network)
+}
+
+net <- MakeNNGraph(16,2)
+g = graph_from_adjacency_matrix(net, mode = 'undirected')
+
+
+
+#plot
+ggraph(g, layout = 'linear', circular = TRUE) + 
+  geom_edge_arc(aes(), show.legend = FALSE) + 
+  geom_node_point()
+
+####### DEGREE ########
+
+#list of degree
+degree(g)
+#mean degree
+mean(degree(g))
+
+######## PATH #########
+
+#a matrix of shortest path length
+distances(g)
+#mean shortest path
+mean(distances(g))
+#longest shortest path
+diameter(g)
+#looking at the actual path (from node 1 to node 2)
+all_shortest_paths(g, from = 1, to = 2)
+
+######## Clustering #########
+transitivity(g)
+transitivity(g, type = 'local')
+
+
+
+
+
+```
+
+Make a small world network from adjacency matrix
+```{r}
+#make a small world
+#basically, you take a lattice, you iterate through connections with prob p to rewire somewhere else
+#double connections and loops are forbidden
+
+MakeSmallWorld <- function(N,p=0.05,k=2) {
+
+network <- MakeNNGraph(N,k)
+
+for (i in 1:N) {
+
+buddies <- as_tibble(network) %>%
+  mutate(link_to = paste(rep(1:N))) %>% 
+  filter(network[i,] == 1) %>% 
+  select(link_to) %>% 
+  as_vector() %>% 
+  as.integer()
+
+notbuddies <- rep(1:N)
+notbuddies <- notbuddies[-(c(i,buddies))]
+
+change <- rbinom(length(buddies), 1, p)
+n_changes <- sum(change)
+
+network[buddies,i] <- ifelse(change == 1, 0, 1)
+network[i,buddies] <- ifelse(change == 1, 0, 1)
+
+newlink <- sample(notbuddies, n_changes, replace = TRUE)
+
+network[newlink,i] <- 2
+network[i,newlink] <- 2
+
+}
+network <- replace(network, network == 2, 1)
+return(network)
+}
+
+net <- MakeSmallWorld(16)
+#Create the graph object and plot it
+g = graph_from_adjacency_matrix(net, mode = 'undirected')
+
+
+#some stat' on the graph
+ecount(g) #number of edges
+vcount(g) #number of vertex (= fancy word for nodes)
+
+#plot
+ggraph(g, layout = 'linear', circular = T) + 
+  geom_edge_link( show.legend = FALSE) + 
+  geom_node_point()
+
+
+#mean shortest path
+mean(distances(g))
+
+#clustering coef
+transitivity(g)
+
+
+g <- watts.strogatz.game(1, 16, 2, 0.05)
+#plot
+ggraph(g, layout = 'linear', circular = T) + 
+  geom_edge_arc( show.legend = FALSE) + 
+  geom_node_point()
+```
+Preferential attachment - Adjacency list
+```{r}
+## Preferential Attachment
+
+MakePrAttachment <- function(N){
+  
+nodes <- tibble(node = 1, degree = 0)
+network <- tribble(
+  ~From, ~To,)
+
+for (i in 2:N){
+ z_scores <- (nodes$degree - mean(nodes$degree)) / sd(nodes$degree)
+ 
+ prob <- case_when(i == 2 ~ 1,
+                   sd(nodes$degree) == 0 ~ 1/length(nodes$node),
+                   TRUE ~ pnorm(z_scores))
+ 
+ choice = sample(nodes$node,1, prob = prob)
+ 
+ network <- add_row(network, From = i, To = choice)
+ 
+ nodes <- add_row(nodes, node = i, degree = 1)
+ nodes[choice,2] <- nodes[choice,2] + 1
+ 
+ 
+
+}
+return(network)
+}
+
+net <- as.matrix(MakePrAttachment(16), 2)
+g <- graph_from_edgelist(net,directed = FALSE)
+
+ggraph(g, layout = 'nicely') + 
+  geom_edge_link(aes(color = 'red', end_cap = circle(3, 'mm'), start_cap = circle(3,'mm'), show.legend = FALSE)) + 
+  geom_node_text(aes(label = V(g )))
+
+
+dens(nodes$degree)
+```
+
+```{r}
+
+al <- as_edgelist(g)
+am <- as.matrix(as_adjacency_matrix(g))
+
+
+g <- graph_from_edgelist(al,directed = FALSE)
+
+ggraph(g, layout = 'nicely') + 
+  geom_edge_link(aes(color = 'red', end_cap = circle(3, 'mm'), start_cap = circle(3,'mm'), show.legend = FALSE)) + 
+  geom_node_text(aes(label = V(g )))
+```
+

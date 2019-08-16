@@ -1,0 +1,23 @@
+{% extends "global/Page.html" %}
+{% load staticfiles otree %}
+
+{% block title %}
+    Result
+{% endblock %}
+
+{% block content %}
+    {% if group.finalDraw == 'Blue' %}
+        <p> Blue ball! </p>
+    {% else %}
+        <p> Red ball! </p>
+    {% endif %}
+
+    {% if player.right == True %}
+        <p> Good guess! </p>
+    {% else %}
+        <p> You failed. </p>
+    {% endif %}
+
+    {% next_button %}
+
+{% endblock %}

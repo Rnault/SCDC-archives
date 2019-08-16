@@ -1,0 +1,313 @@
+---
+title: "Genetics Algorithms"
+author: "Rnault"
+date: "1/11/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(parallel)
+library(tidyverse)
+```
+
+WHAT ARE THE EVOLUTIONNARY PRESSURES THAT INCENTIVIZE CHEATING?
+
+
+FUNCTIONS
+# Here is a more optimized version of the game. Although it outputs the same format of results, it might be smart to use for extremely long runs
+```{r}
+PayoffEq <- function(x,check,cheat){(x - check*x/2 - check*cheat*x/2)}
+
+#Don't think this one too hard, just know it's similar to the other one, but faster
+CoopCor_Game <- function(tmax,BiasP1,BiasP2,BiasP3,p_lose){
+  rolls <- tibble(
+    P1_roll = sample(c(1:6),replace = TRUE, size = tmax),
+    P2_roll = sample(c(1:6),replace = TRUE, size = tmax),
+    P1_bernoulli = rbernoulli(tmax,BiasP1),
+    P2_bernoulli = rbernoulli(tmax,BiasP2),
+    P3_bernoulli = rbernoulli(tmax,BiasP3),
+    Lose_bernoulli = rbernoulli(tmax,p_lose)) %>% 
+    mutate(P1_cheat = if_else(P1_roll != 6 & P1_bernoulli,1,0),
+           P1_roll = ifelse(P1_cheat == 1, 6, P1_roll),
+           P2_cheat = if_else(P2_roll != P1_roll & P2_bernoulli,1,0),
+           P2_roll = ifelse(P2_cheat == 1, P1_roll, P2_roll),
+           cheated = if_else(P1_cheat == 1 | P2_cheat == 1,1,0),
+           check = if_else(P1_roll == P2_roll & P3_bernoulli, 1, 0),
+           ingame = ifelse(Lose_bernoulli & check == 0 & cheated == 1 & P1_roll == P2_roll, 0, NA),
+           th_payoff = if_else(P1_roll == P2_roll, PayoffEq(P1_roll, check, cheated), 0)) %>% 
+    fill(., ingame, .direction = "down") %>% 
+    mutate(ingame = ifelse(is.na(ingame),1,0),
+           payoff = th_payoff * ingame,
+           cumpayoff = cumsum(payoff) * ingame) %>% 
+    select(-contains("bernoulli"))
+  
+  return(rolls)
+}
+
+CoopCor_simple <- function(n_game, tmax, BiasP1, BiasP2, BiasP3, lose.game.chance){
+  rerun(.n = n_game, CoopCor_Game(tmax, BiasP1, BiasP2, BiasP3, lose.game.chance)) %>% 
+    map_dfr(., .f = rbind, .id = "ngame")
+}
+```
+
+
+# Evolution
+To evolve, we have to define 3 things:
+-our environment -> Here, environment is the pool of 'companies'. Each company is a team of 3 that plays the game every timestep. After a run, they are ordered by their results.
+-our time steps -> Each time step, all companies play the game, get ordered, the one that lost get updated
+-our updating strategy: in the following block
+Then wrap this all up in one function
+```{r}
+#Generate N random set of 3 agents
+Companies <- function(N, peace = 0){
+  companies <- as_tibble(matrix(runif(N*3,0,1),N,3))
+  colnames(companies) <- c("P1","P2","Leader")
+  
+  #Add the non-cheating baseline
+  if (peace == 1){companies[1,] <- c(0,0,0)}
+  
+  return(companies)
+}
+
+#This function runs multipe games at the same time for different companies (using the Sep function)
+RunGen <- function(companies){
+  companyList <- as.list(as_tibble(t(companies)))
+  results <- as_tibble(t(as_tibble(mclapply(companyList, Sep, mc.cores = 4))))
+  colnames(results) <- c("fitness","cheat")
+  
+  return(results)
+}
+
+#this function makes a run of the game + extra calculations needed for the updating
+Sep <- function(company){
+  # Run <- CoopCor(1, 100, BiasedChoice(company[1]), BiasedChoice(company[2]), BiasedChoice(company[3]))
+  Run <- CoopCor_simple(n_game = 1, tmax = 100, company[1], company[2], company[3], p_lose = 0.2)
+
+  #get cumulative payoff of the run (if game lost = 0)
+  # Run$cumpayoff <- ifelse(Run$ingame == 1, cumsum(Run$payoff), 0)
+
+  #the fitness is how much they get when reaching the end
+  fitness <- Run$cumpayoff[100]
+
+  #get the guy who cheated when lost (3 = both, 1 = P1, 2 = P2, 0 = no one cheated)
+  cheater <- subset(Run, min(ingame) == 0)
+  if (dim(cheater)[1] != 0 ){
+    if (cheater[1,4] == 1){
+      if (cheater[1,5] == 1) {
+        cheat <- 3
+      }
+      else {cheat <- 1}
+    }
+    else{cheat <- 2}
+  }
+  else {cheat <- 0}
+  return(c(fitness,cheat))
+}
+
+#Running generations of companies and check the evolution of members
+#firing_method can take 3 inputs: "leader", "cheater", "everyone"
+EvoLight <- function(N_companies, N_generations, firing_method, ...){
+  
+  # initialise empty data frame
+  evo <- as_tibble(matrix(NA,N_generations,6))
+  colnames(evo) <- c("meanP1","meanP2","meanLeader","BestFitness", "AverageFitness", "SDFitness")
+  
+  # draw random companies
+  companies <- Companies(N_companies)
+  
+  # start evolution
+  for (i in 1:N_generations){
+    results <- RunGen(companies)
+    evo$meanP1[i] <- mean(companies$P1)
+    evo$meanP2[i] <- mean(companies$P2)
+    evo$meanLeader[i] <- mean(companies$Leader)
+    evo$BestFitness[i] <- max(results$fitness)
+    evo$AverageFitness[i] <- mean(results$fitness)
+    evo$SDFitness[i] <- sd(results$fitness)
+
+    
+    # Update companies based on firing method
+    if (firing_method == "leader") {companies <- UpdateLeader(results, companies, N_companies)}
+    if (firing_method =="cheater") {companies <- UpdateTeam(results, companies, N_companies)}
+    if (firing_method == "everyone") {companies <- UpdateEveryone(results, companies, N_companies)}
+    
+    #counter to keep track
+    print(i)
+  }
+  
+  return(evo)
+}
+```
+
+#### UPDATE FUNCTIONS
+When the game is lost because of cheating, the company has to be rearranged. We can fire some (or all) members and hire some that are similar to the people working in the succesfull companies
+For that, we define 3 different ways to fire employees, thus 3 ways for the sytem to evolve.
+1.We can sack the leader. After all, he's responsible for his team. This is his lack of professionalism that led u here.
+2.We can investigate, find out who cheated, and fire that person. After all, his colleagues might not be aware of his misconduct.
+3.We sack everyone. We don't have time to lose, the team failed, the team is responsible
+
+When people get fired, they are being replaced by employees with similar profiles to the employees belonging to the 10% best companies. We introduce randomness by generating a new bias based on a normal distribution new employee ~ norm(mean = one of the best employees, sd= 0.1)
+
+```{r}
+#Only the leader get sacked
+UpdateLeader <- function(results, companies, N_companies){
+  all <- cbind(companies,results)
+  best <- all[with(all,order(-fitness)),]
+  best <- best[1:((10/100)*N_companies),]
+  losers <- length(subset(all$fitness, all$fitness == 0))
+  companies$Leader <- ifelse(all$fitness == 0, rnorm(losers,sample(best$Leader,replace = TRUE),0.1),companies$Leader)
+  companies$Leader <- ifelse(companies$Leader < 0, 0, ifelse(companies$Leader > 1, 1, companies$Leader))
+  return(companies)
+}
+
+#Only the cheater(s) get sacked
+UpdateTeam <- function(results, companies, N_companies){
+
+  #unite both df
+  all <- cbind(companies,results)
+  
+  #extract the 10% best teams
+  best <- all[with(all,order(-fitness)),]
+  best <- best[1:((10/100)*N_companies),]
+  
+  #extract the number losers
+  losers <- subset(all, all$fitness == 0)
+  
+  #Change P1 if we lost because of him
+  companies$P1 <- ifelse(all$cheat == 1, rnorm(length(subset(losers,losers$cheat == 1)),sample(best$P1,replace = TRUE),0.1), companies$P1)
+  
+  #Change P2 if we lost because of him
+  companies$P2 <- ifelse(all$cheat == 2, rnorm(length(subset(losers,losers$cheat == 2)),sample(best$P2,replace =   TRUE),0.1),companies$P2)
+  
+  #Change both if it's a collective cheat (more tricky)
+  # First get a sample of number in the range of the number of teams in the best df. 
+  # We want as many as there is team cheating losers. This is a list of indexes to choose from
+  hiringList <- sample(c(1:length(best$P1)),length(subset(losers[,1],losers$cheat == 3)), replace = TRUE)
+  
+  #Then we replace both P1 and P2 at once using the list of positions sampled with the best df
+  companies[all$cheat == 3,1:2] <- best[hiringList,1:2]
+  
+  #And we introduce a little error in the ones we just replaced
+  companies$P1[all$cheat == 3] <- rnorm(length(companies$P1[all$cheat == 3]),companies$P1[all$cheat == 3],0.1)
+  companies$P2[all$cheat == 3] <- rnorm(length(companies$P2[all$cheat == 3]),companies$P2[all$cheat == 3],0.1)
+  
+  #make sure no one is out of range (0,1)
+  companies$P1 <- ifelse(companies$P1 < 0, 0, ifelse(companies$P1 > 1, 1, companies$P1))
+  companies$P2 <- ifelse(companies$P2 < 0, 0, ifelse(companies$P2 > 1, 1, companies$P2))
+  return(companies)
+}
+
+#Everyone get sacked
+UpdateEveryone <- function(results, companies, N_companies){
+  all <- cbind(companies,results)
+  best <- all[with(all,order(-fitness)),]
+  best <- best[1:((10/100)*N_companies),]
+  losers <- length(subset(all[,1], all$fitness == 0))
+  
+  #Choose replacement team amongst the best
+  hiringList <- sample(c(1:length(best$P1)),losers, replace = TRUE)
+  companies[all$fitness == 0,1:3] <- best[hiringList,1:3]
+  
+  #Shuffle a little bit to introduce error
+  companies$P1[all$fitness == 0] <- rnorm(losers,companies$P1[all$fitness == 0],0.1)
+  companies$P2[all$fitness == 0] <- rnorm(losers,companies$P2[all$fitness == 0],0.1)
+  companies$Leader[all$fitness == 0] <- rnorm(losers,companies$Leader[all$fitness == 0],0.1)
+  
+  #Make sure no one is out of range (0,1)
+  companies$P1 <- ifelse(companies$P1 < 0, 0, ifelse(companies$P1 > 1, 1, companies$P1))
+  companies$P2 <- ifelse(companies$P2 < 0, 0, ifelse(companies$P2 > 1, 1, companies$P2))
+  companies$Leader <- ifelse(companies$Leader < 0, 0, ifelse(companies$Leader > 1, 1, companies$Leader))
+  
+  return(companies)
+}
+```
+
+
+
+####################### II. RUNS ###############################
+
+```{r}
+## N=1000 AND GEN=250 
+#if everyone gets fired
+everyone <- EvoLight(100, 100, "everyone")
+
+#if only the cheater(s) gets fired
+cheater <- EvoLight(100, 100, "cheater")
+
+#if only the leqder gets fired
+leader <- EvoLight(100, 100, "leader")
+
+#Save
+#write.csv(everyone, "data/sims/evo/update_everyone_5%_10000.csv", row.names = FALSE)
+#write.csv(leader, "data/sims/evo/update_leader_5%_10000.csv", row.names = FALSE)
+```
+
+
+# Visualize
+
+```{r}
+theme_set(theme_light())
+
+combined <- map_df(list(everyone, cheater, leader), rbind, .id = "update_function") %>%
+  mutate(update_function = fct_recode(update_function, "everyone" = "1", "cheater" = "2", "leader" = "3")) %>% 
+  group_by(update_function) %>%
+  mutate(generation = row_number()) %>%
+  gather(Player, Mean.Bias, meanP1:meanLeader) %>% 
+  mutate(Player = as.factor(str_remove(Player, "mean")))
+
+
+
+# Plot Biases over time
+combined %>% 
+  ggplot(aes(generation, Mean.Bias, color = Player)) +
+  geom_line() +
+  facet_wrap(~ update_function) +
+  labs(x = "Generations",
+       y = "Mean Dishonesty",
+       title = "Evolution of dishonesty over time, depending on updating function",
+       subtitle = "High values mean more dishonesty / more checking")
+
+
+# Plot fitness over time
+combined %>% 
+  ggplot(aes(generation, AverageFitness, color = update_function)) +
+  geom_line() +
+  # geom_ribbon(aes(ymin = AverageFitness - SDFitness, ymax = AverageFitness + SDFitness), color = NA, alpha = 0.3, fill = "grey") +
+  geom_hline(yintercept = 58.33) + # theoretical average if everyone is honest
+  expand_limits(y = 0) +
+  facet_wrap(~ update_function) +
+  labs(x = "Generations",
+       y = "Average Performance of each Generation",
+       title = "Fitness over time, depending on updating function", 
+       color = "Update Function")
+
+
+# Plot best fitness
+combined %>% 
+  ggplot(aes(generation, BestFitness, color = update_function)) +
+  geom_line() +
+  facet_wrap(~ update_function) +
+  geom_hline(yintercept = 58.33) + # theoretical average if everyone is honest
+  expand_limits(y = 0) +
+  labs(x = "Generations",
+       y = "Best Performance of each Generation",
+       title = "Fitness over time, depending on updating function", 
+       color = "Update Function")
+
+
+
+
+# Animate!
+library(gganimate)
+
+
+combined %>% ggplot(aes(generation, value, color = key)) +
+  geom_point(size = 1) +
+  geom_line() +
+  facet_wrap(~ src) +
+  transition_reveal(generation)
+
+```

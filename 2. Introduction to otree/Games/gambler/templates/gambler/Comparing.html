@@ -1,0 +1,16 @@
+{% extends "global/Page.html" %}
+{% load staticfiles otree %}
+
+{% block title %}
+    Comparing with others
+{% endblock %}
+
+{% block content %}
+    {% for p in others_choices %}
+<p>Another player chose {{p}}</p>
+    {% endfor %}
+
+    {% formfield player.secondChoice label="Wanna change?" %}
+    {% next_button %}
+
+{% endblock %}

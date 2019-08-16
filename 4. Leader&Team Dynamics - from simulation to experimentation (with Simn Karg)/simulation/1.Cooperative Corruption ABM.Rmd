@@ -1,0 +1,420 @@
+---
+title: "Untitled"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(purrr)
+```
+                                        #/!\ NOT OPTIMISED /!\ 
+
+Cooperative Corruption
+ABM model of a game simulating interaction between leader and team in a situation where cheating is possible (and incentivized): the Rely or Verify game
+
+Although this version is not computationally optimal, its sequential organisation makes it easy to
+grasp each step of the process the players go through while playing the game. This makes it a good pedagogical tool, hopefully. :)
+
+
+
+########################  I.CODING  ############################
+
+The function takes 5 inputs:
+  -n_game: the number of games to run (default: 1)
+  -tmax: the number of rounds a game should be (default: 40)
+  -agents1 and agent2: a STRATEGY function to decide to cheat or not
+  The function has to return ether 1 (to signal cheating) or 0 (to signal no cheating)
+  -leader: a STRATEGY function to decide to check or not
+  As before, the function has to return ether 1 (to signal checking) or 0 (to signal no checking)
+  -p_lose: the probability to lose the game upon non verifyed cheating (expressed between 0 and 1, 0.05 being 5% chance of losing) (default: 0.05)
+  
+*** THE GAME ***
+```{r}
+CoopCor <- function(n_game=1,tmax=40,agent1,agent2,leader,p_lose=0.05){
+  
+  #First, we create the main dataset we are going to export in the end
+  #It is empty, with the right amount of rows and columns
+  #We will add each run of the game to it
+  game <-  as.data.frame(matrix(NA,n_game*tmax,10))
+  colnames(game) <- c("P1_roll","P2_roll", "P1_cheat", "P2_cheat", "check","cheated", "payoff","th_payoff","ingame","n_game")
+  
+  #This overarching loop allows to play multiple games in a row with the same settings.
+  #1 run of it is 1 game of 3 players.
+  for (n in 1:n_game){
+  
+  #Then we define a still_in_game variable to identify teams who lost by GREED
+  #In the following loop, still_in_game might change to 0 if players cheat and leader doesn't
+  #check, in which case, the payoff equation will always return 0
+  still_in_game <- 1
+   
+  #Then we can loop in time to play the game. Each r is 1 round of the game
+    for (r in 1:tmax){
+      #t is used to position r in the main dataframe (successive games start at
+      #different rows)
+      t = (n-1)*tmax + r
+  
+      ###P1 TURN
+      #We draw a number between 1 and 6 with equal probability, simulating the dice roll
+      game$P1_roll[t] <- sample(c(1:6),1, replace = TRUE)
+      #If we don't have 6, we can decide to cheat, using agent1's STRATEGY
+      game$P1_cheat[t] <- ifelse(game$P1_roll[t]!= 6, agent1(game[1:t-1,]),0)
+      #if we cheated (cheat == 1), we change the roll to 6 (because why not go )
+      game$P1_roll[t] <- ifelse(game$P1_cheat[t] == 1, 6, game$P1_roll[t])
+      
+      ###P2 TURN (following same process)
+      game$P2_roll[t] <- sample(c(1:6),1, replace = TRUE)
+      #if we are different from P1 we can decide to cheat, using agent2's STRATEGY
+      game$P2_cheat[t] <- ifelse(game$P2_roll[t]!= game$P1_roll[t], agent2(game[1:t-1,]),0)
+      #if we cheated (cheat == 1), we change the roll to match P1's roll
+      game$P2_roll[t] <- ifelse(game$P2_cheat[t] == 1, game$P1_roll[t], game$P2_roll[t])
+    
+      #The following only works if they get the same diceroll
+      #If P1_roll != P2_roll, payoff is 0. Otherwise, use the payoff equation to calculate pay off
+      x <- ifelse(game$P1_roll[t] == game$P2_roll[t],game$P1_roll[t],0)  
+      game$th_payoff[t] <- x
+      
+      ####LEADER TURN
+      #Using a STRATEGY to decide to check or not (do it if agents succeeded only, so if payoff
+      #is different than 0)
+      game$check[t] <- ifelse(x != 0, leader(game[1:t-1,]),0)
+      
+      ###payoff calculation
+      #First we coarse-grain cheating(we don't need to know who did it, just that it happened.
+      #It is also only relevant if they get a payoff)
+      game$cheated[t] <- ifelse((game$P1_cheat[t] == 1 | game$P2_cheat[t] == 1) & x != 0, 1,0)
+      #then we can run the equation
+      game$payoff[t] <- PayoffEq(x,game$check[t],game$cheated[t],still_in_game)
+      
+      #If a cheat happened, but no one checked, MENACING GAMBLE happens!!
+      #a bernoulli with p_lose chance to return TRUE, wich throws everyone out of the game
+      if(game$check[t] == 0 & game$cheated[t] == 1)
+      #we set still_in_game to 0
+        {if(rbernoulli(1,p_lose)){still_in_game <- 0}}
+      
+      #To finish, we report if we are still in game or if we lost this turn
+      game$ingame[t] <- still_in_game
+      #And the game we are currently in
+      game$n_game[t] <- n
+    }
+  
+    }
+  return(game)
+}
+
+#Equation to calculate payoff
+#It takes in the dice roll value (1 to 6), wether there was a check or not (0 or 1), wether someone cheated or not (0 or 1), and wether the team is still in game or not (0 or 1)
+PayoffEq <- function(dice,check,cheat,ingame){
+(dice - check*dice/2 - check*cheat*dice/2)*ingame}
+```
+
+
+*** STRATEGIES ***
+Functions that we can use inside of the CoopCor game. 
+```{r}
+#The simplest strategy possible. The function
+#The player simply has a bias towards cheating/checking.
+#rate = 1 means the player cheats/checks all the time.
+#rate = 0 means the player never cheats/checks.
+BiasedChoice <- function(rate){
+  # closure
+  strategy <- function(game) {
+    #We use a bernoulli to simulate a choice of 0 or 1 using rate as probability
+    #As bernoulli returns TRUE and FALSE, we need to transform them in integers: 1 and 0
+    return(as.integer(rbernoulli(1,rate)))
+  }
+  return(strategy)
+}
+
+############## LEADER STRATEGIES ##################
+
+#This is a set of strategies to use with the leader
+#It makes the leader smarter by relying on information from previous dice rolls to take a #decision. The purpose is to simulate an ideal ethical leader and evaluate its impact on the
+#team's performance.
+#   -The leader is an expert in the field.
+#He knows the difficulty of the task (in our case, there is 6/36 chance to roll the same number,
+#thus 1/6 chance to have a payoff). Thus, he knows the expected mean pay off (per round) when
+#there is absolutely no cheating: 3.5*1/6 = 0.583333
+#By choosing a window size, the leader can calculate the actual mean payoff in that window. If it
+#is bigger than the expected mean payoff, he becomes suspicious of his team's efficacy and checks.
+#Otherwise, he can lay back and estimate that his team is doing a great job.
+#There is 2*2 variants of the strategy, varying along 2 different axis
+
+#1. The leader can be "theoretical" or "biased".
+#To understand the difference, we have to understand that when a team is caught cheating, the
+#payoff for this round is zero.
+#   *A theoretical leader remembers the claims of its employees and how they tried to screw him.
+#If you cheated but got caught in the act, he'll remember the payoff you should have obtained, and
+#calculate the mean payoff according to that "claimed" theoretical payoff you should have gotten
+#if cheating wasn't discovered.
+#   *A biased leader is relaxed and trustfull. When he catches his employees cheating, he'll stop #them for the time being but decide to move on right after. This leads him to suffer from
+#chronical amnesia, everytime he calculates the mean payoff for the selected window size, an
+#instance of caught cheating (with payoff 0) is similar to an instance of no success (pay off 0
+#too).
+#2. The leader can be strict or statistician
+#   *A strict leader doesn't think twice, if the observed mean pay off crosses the line of the #true mean pay off, he'll act.
+#   *A statistician leader knows a bit about probability theory and statistics. He knows that it
+#is very rare to observe the true mean of a population with a given sample, sometimes you might
+#just have a lucky strike. Thus he knows about variance and its relationship to the number of
+#observations (here, window size). With the power of his calculator, he uses a t-test to decide if
+#the observed value of the mean stands in a reasonable range from the true mean given the records
+#he has access to.
+
+
+
+###### STRICT BIASED LEADER #####
+#Has a memory of N + 1, looking at the mean payoff in a N + 1 window, compare with expectected mean payoff, if higher, check
+N_Cumulative_Mean <- function(N){
+  
+  # closure
+  strategy <- function(game) {
+    #define the range to look for
+    n_prev_rounds = nrow(game)
+    begin_window = max(0, n_prev_rounds-N)
+    
+    # print(game[begin_window:n_prev_rounds,])
+    #If we just started the game do it at random
+    if (n_prev_rounds < 1) return(rbinom(1,1,0.5))
+    
+    
+    mean_payoff = mean(game$payoff[begin_window:n_prev_rounds])
+    # print(mean_payoff)
+    expected_payoff = (1/6)*3.5 
+    # print(expected_payoff)
+    strategic_choice = ifelse(mean_payoff > expected_payoff, 1, 0)
+    strategic_choice = ifelse(mean_payoff == expected_payoff, rbinom(1,1,.5), round(strategic_choice))
+    
+    return(strategic_choice)
+  }
+  return(strategy)
+}
+
+###### STRICT THEORETICAL LEADER #####
+N_Th_Cumulative_Mean <- function(N){
+  
+  # closure
+  strategy <- function(game) {
+    #define the range to look for
+    n_prev_rounds = nrow(game)
+    begin_window = max(0, n_prev_rounds-N)
+    
+    # print(game[begin_window:n_prev_rounds,])
+    #If we just started the game do it at random
+    if (n_prev_rounds < 1) return(rbinom(1,1,0.5))
+    
+    
+    mean_payoff = mean(game$th_payoff[begin_window:n_prev_rounds])
+    # print(mean_payoff)
+    expected_payoff = (1/6)*3.5 
+    # print(expected_payoff)
+    strategic_choice = ifelse(mean_payoff > expected_payoff, 1, 0)
+    strategic_choice = ifelse(mean_payoff == expected_payoff, rbinom(1,1,.5), round(strategic_choice))
+    
+    return(strategic_choice)
+  }
+  return(strategy)
+}
+
+###### STATISTICIAN THEORETICAL LEADER #####
+N_Th_Cumulative_Mean_ttest <- function(N){
+  
+  # closure
+  strategy <- function(game) {
+    #define the range to look for
+    n_prev_rounds = nrow(game)
+    begin_window = max(0, n_prev_rounds-N)
+    prev = game$th_payoff[begin_window:n_prev_rounds]
+    # print(game[begin_window:n_prev_rounds,])
+    
+    ##A t-test cannot handle less than 2 datapoint to compare, and cannot handle no variance
+    #If we just started the game do it at random until we have a history of at least size 2
+    if (n_prev_rounds < 2) return(rbinom(1,1,0.5))
+    #If all values in the window are the same:
+    #it is only 0s, in which case mean = 0, so don't check, it's probably fine
+    #it is only 1 or 2 or..., in which case mean >> 0.58, so check, it's suspicious
+    if (length(unique(prev)) == 1) return(as.integer(prev[1] > 0))
+
+    expected_payoff = (1/6)*3.5 
+    # print(expected_payoff)
+    p_check = 1 - t.test(prev,mu = expected_payoff, alternative = "greater")$p.value
+    strategic_choice = as.integer(rbernoulli(1,p_check))
+    
+    
+    
+    return(strategic_choice)
+  }
+  return(strategy)
+}
+
+###### STATISTICIAN BIASED LEADER ##### 
+N_Cumulative_Mean_ttest <- function(N){
+  
+  # closure
+  strategy <- function(game) {
+    #define the range to look for
+    n_prev_rounds = nrow(game)
+    begin_window = max(0, n_prev_rounds-N)
+    prev = game$payoff[begin_window:n_prev_rounds]
+    # print(game[begin_window:n_prev_rounds,])
+    
+    #If we just started the game do it at random until we have a history of at least size 2
+    if (n_prev_rounds < 2) return(rbinom(1,1,0.5))
+    #If all values in the window are the same:
+    #it is only 0s, in which case mean = 0, so don't check
+    #it is only 1 or 2 or..., in which case mean >> 0.58, so check
+    if (length(unique(prev)) == 1) return(as.integer(prev[1] > 0))
+
+    expected_payoff = (1/6)*3.5 
+    # print(expected_payoff)
+    p_check = 1 - t.test(prev,mu = expected_payoff, alternative = "greater")$p.value
+    strategic_choice = as.integer(rbernoulli(1,p_check))
+    
+    
+    
+    return(strategic_choice)
+  }
+  return(strategy)
+}
+```
+
+
+########################  II.RUNING THE GAME  ############################
+
+*** PROTOTYPICAL SCENARIOS ***
+Here, we define a set of prototypical scenarios using only the simple BiasedChoice strategy. Those should be highly predictible, defining them allows us to set baselines to understand the behavioural range of the game. We can then compare them and build better expectation.
+```{r}
+#No one cheats, no one checks, this is the perfect trustworthy workplace
+Peaceful_Baseline <- CoopCor(10, 1000, BiasedChoice(0), BiasedChoice(0), BiasedChoice(0))
+
+#Everyone cheats, no one is here to regulate, this is speculative chaos
+Wall_Street <- CoopCor(10, 1000, BiasedChoice(1), BiasedChoice(1), BiasedChoice(0))
+
+#Everyone tries to get away with it, but there is always someone to watch
+USSR <- CoopCor(10, 1000, BiasedChoice(1), BiasedChoice(1), BiasedChoice(1))
+
+#Even though you've always followed orders, you'll never be trusted
+Big_Brother <- CoopCor(10, 1000, BiasedChoice(0), BiasedChoice(0), BiasedChoice(1))
+
+#Although the task is very similar, players have different roles. By playing first, P1's roll sets
+#the total amount that can be gained this round. By playing second, P2's role is to match this
+#amount to make it a payoff.
+#Therefore, we can have 2 more scenarios
+The_Greedy <- CoopCor(10, 1000, BiasedChoice(1), BiasedChoice(0), BiasedChoice(0.5)) #overall,
+#always get 6, but only sometimes (when P2 rolls 6 too)
+The_Conformist <- CoopCor(10, 1000, BiasedChoice(0), BiasedChoice(1), BiasedChoice(0.5)) #overall,
+#always get what P1 rolls, higher risk of loosing the game as there is a (cheated) payoff every
+#turn
+
+#Self Concept Maintenance Theory, a little bit of cheating doesn't hurt anybody... does it?
+SCM <- CoopCor(10, 1000, BiasedChoice(0.1), BiasedChoice(0.1), BiasedChoice(0.1))
+
+#2 of the smart leaders for early check
+TheoreticalLeader <- CoopCor(1000, 100, BiasedChoice(0.2), BiasedChoice(0.2), N_Th_Cumulative_Mean(25))
+BiasedLeader <- CoopCor(1000,100,BiasedChoice(0.2),BiasedChoice(0.2),N_Cumulative_Mean(25))
+```
+
+# Save simulations for later use /!\ DON'T DO IT, WE GOT IT COVERED
+```{r}
+scenarios <- list("Peaceful_Baseline" = Peaceful_Baseline, "Wall_Street" = Wall_Street, "USSR" = USSR, "Big_Brother" = Big_Brother, "The_Greedy" = The_Greedy, "The_Conformist" = The_Conformist, "SCM" = SCM, "TheoreticalLeader" = TheoreticalLeader, "BiasedLeader" = BiasedLeader)
+
+for(i in seq_along(scenarios)){
+  write.csv(scenarios[[i]], paste0(paste0("data/sims/sim_plots/", names(scenarios)[i]), ".csv"), row.names = FALSE)
+}
+```
+
+
+*** Smarter Leader ***
+# Comparing strategy methods
+
+As stated earlier, we have 2 different strategies that use a window of N previous round to decide
+#to check or not.
+* A forgiving leader that takes the actual payoff into account. As there is no pay off when a cheat has been checked by the leader, it counts as a fail and draws the average score down. "Common guys, this practice is illegal. I'll erase the record, just like if nothing happened. I trust you to do it properly next time."
+* A grudgy leader that takes into account the theoretical pay off, counting the values of cheats that have been checked to calculate the average score. "This is unacceptable! You won't get anything this time. I may give you another chance, but I remember your foolish claims!"
+
+How would we expect the game to unfold when those strategies are faced by different levels of cheating?
+
+# Simulations
+```{r}
+# quick and dirty (but efficient) simulations
+
+#Here, we define a list that will host all our different simulations
+simulations_g <- list() #the grudgy biased leader / he'll keep track of your cheating and won't give you a chance if your claims are above his ideals
+simulations_f <- list() #the strict forgiving leader / he won't write down that you cheated, but once you cross the line, he'll notice
+simulations_g_tt <- list() #the grudgy statistician leader / he'll keep track of your cheating but also that your results depend on the size of his records
+simulations_f_tt <- list() #the forgiving statistician leader / he won't write down that you cheated, and will also keep in mind that your results depend on the size of his records
+
+#Because the leader doesn't care who cheted in the team, just that it happened, and because h
+#only takes into account the mean payoff to inform his judgement, players can have the same bias
+#to cheat.
+biases <- seq(0,1,0.1)
+
+#We want a 100 games with a 100 rounds
+games <- 100
+rounds <- 100
+
+#We create a loop that runs the game for each bias and each type of leader
+for(i in seq_along(biases)){
+  print(biases[i])
+  simulations_g[[i]] <- CoopCor(games, rounds, BiasedChoice(biases[i]), BiasedChoice(biases[i]), N_Th_Cumulative_Mean(25))
+  simulations_f[[i]] <- CoopCor(games, rounds, BiasedChoice(biases[i]), BiasedChoice(biases[i]), N_Cumulative_Mean(25))
+  simulations_g_tt[[i]] <- CoopCor(games, rounds, BiasedChoice(biases[i]), BiasedChoice(biases[i]), N_Th_Cumulative_Mean_ttest(25))
+  simulations_f_tt[[i]] <- CoopCor(games, rounds, BiasedChoice(biases[i]), BiasedChoice(biases[i]), N_Cumulative_Mean_ttest(25))
+}
+
+
+####### FROM HERE, SOME FORMATTING MAGIC TO GET A READABLE FORMAT OF THE DATA ########
+names(simulations_f) <- biases
+names(simulations_g) <- biases
+names(simulations_f_tt) <- biases
+names(simulations_g_tt) <- biases
+
+simulations_g_df <- plyr::ldply(simulations_g, data.frame) %>%
+  mutate(bias = as.numeric(as.character(.id)),
+         heuristic = "grudgy")
+
+simulations_f_df <- plyr:: ldply(simulations_f, data.frame) %>%
+  mutate(bias = as.numeric(as.character(.id)),
+         heuristic = "forgiving")
+
+simulations_gtt_df <- plyr:: ldply(simulations_g_tt, data.frame) %>%
+  mutate(bias = as.numeric(as.character(.id)),
+         heuristic = "grudgy_ttest")
+
+simulations_ftt_df <- plyr:: ldply(simulations_f_tt, data.frame) %>%
+  mutate(bias = as.numeric(as.character(.id)),
+         heuristic = "forgiving_ttest")
+
+```
+
+# Save simulations for later use
+```{r}
+### We want to keep 2 different dataframes
+
+#1. The data frames with everything, allwoing to keep track of what happens in time
+sim_comb <- rbind(simulations_g_df,simulations_f_df,simulations_gtt_df,simulations_ftt_df) %>%
+  group_by(heuristic, n_game, bias) %>%
+  mutate(turnID = row_number(),
+         cum_pay = cumsum(payoff),
+         lost_game = ifelse(sum(ingame) == rounds, 0, 1),
+         actual_pay = ifelse(lost_game == 0, payoff, 0))
+
+
+#write.csv(sim_comb, "data/sims/sim_plots/leader_heuristic/sim_comb.csv", row.names = FALSE)
+
+#2. A dataframe with summary measures to evaluate overall outcome
+sim_comb_sum <- sim_comb %>%
+  group_by(heuristic, bias, turnID) %>%
+  summarise(mean_pay = mean(payoff),
+            mean_actual_pay = mean(actual_pay),
+            sum_checks = sum(check),
+            sum_cheats = sum(cheated),
+            sum_lost_game = sum(lost_game),
+            sum_unchecked_cheat = sum(ifelse(cheated == 1 & check == 0, 1,0)),
+            sum_checked_cheat = sum(ifelse(cheated == 1 & check == 1, 1,0)),
+            sum_useless_check = sum(ifelse(cheated == 0 & check == 1, 1,0))) %>%
+  group_by(heuristic, bias) %>%
+  mutate(mean_cum_pay = cumsum(mean_pay),
+         mean_cum_actual_pay = cumsum(mean_actual_pay))
+
+#write.csv(sim_comb_sum, "data/sims/sim_plots/leader_heuristic/sim_comb_sum.csv", row.names = FALSE)
+
+```

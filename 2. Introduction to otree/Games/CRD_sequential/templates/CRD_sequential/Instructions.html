@@ -1,0 +1,31 @@
+{% load otree %}
+
+<div class="card bg-light instructions">
+    <div class="card-body">
+    <h3>
+        Climate Game: instructions
+    </h3>
+
+    <p>
+        In this study, you will join a random group of {{ Constants.players_per_group }} players.
+        Each participant in the group is given {{ Constants.endowment }} at the beginning of the game.
+        However, a huge catastrophe is coming and none of that money will be useful if the world ends.
+        But the group has the opportunity to avoid that disaster. To do so, they have to contribute a
+        minimum of {{ Constants.target }} in total over 10 rounds.
+        Each round, each participant in the group decides how much she/he is going to contribute to
+        save the planet. Contribution could be any integer from 0
+        to {{ Constants.endowment }}.
+    </p>
+    <p>
+        By the end of the game, you simply keep the money you have left.
+        If the goal was reached, you're left alive to happily enjoy another day with your money.
+        Otherwise, if the group does not reach the target contribution of {{ Constants.target }},
+        everyone has {{ Constants.losing }}% chance of losing everything.
+        If the goal of {{ Constants.target }} has been reached before the last round starts,
+        you will still need to go through all the remaining rounds to finish the game.
+        <br><br>
+        Press the "next" button whenever you are ready to start playing.
+
+    </p>
+    </div>
+</div>

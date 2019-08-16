@@ -1,0 +1,162 @@
+---
+title: "exploring_data"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# set directories
+knitr::opts_knit$set(root.dir = getwd())
+
+# Libraries for datacleaning and exploration
+library(tidyverse)
+library(purrr)
+# library(fs)
+# library(lme4)
+# library(here)
+
+theme_set(theme_light())
+```
+
+
+# Load in data and preprocessing
+```{r}
+unnecessary_columns <- c("participant.label","participant._is_bot","participant._index_in_pages","participant._max_page_index","participant._current_app_name","participant._current_page_name","participant.ip_address","participant.visited","participant.mturk_worker_id","participant.mturk_assignment_id","participant.payoff","session.mturk_HITGroupId","session.mturk_HITId")
+
+data_raw <- read_csv(file.choose()) %>% 
+  select(-unnecessary_columns) %>%  # these columns don't contain interesting data
+  filter(session.code != "125o1zxh") 
+
+```
+
+
+# Data cleaning
+Long format (repeated rows for each player)
+```{r}
+fill_columns <- c("group.total_contribution", "group.individual_share", "group.max_amount", "player.contribution")
+
+# tidying data, filling NAs 
+data_long <- data_raw %>% 
+  group_by(session.code, participant.code) %>%  
+  fill(c(player.gender, player.age, group.group_id), .direction = "down") %>%
+  fill(contains("MIq"), .direction = "up") %>% 
+  fill(contains("Dq"), .direction = "up") %>% 
+  fill(fill_columns, .direction = "up") %>% 
+  arrange(subsession.round_number, participant.id_in_session) %>% 
+  mutate_at(vars(contains("MI")), .funs = as.numeric) %>% 
+  mutate_at(vars(contains("Dq")), .funs = as.numeric) %>% 
+  group_by(session.code, participant.code, subsession.round_number) %>% 
+  mutate(mi_int = sum(player.MIq1, player.MIq2, (6-player.MIq3),(6-player.MIq4),player.MIq5), # items 3 and 4 are reverse coded
+         mi_sym = sum(player.MIq6,player.MIq7, player.MIq8,player.MIq9,player.MIq10),
+         dospert = sum(player.Dq1,player.Dq2,player.Dq3, player.Dq4, player.Dq5, player.Dq6)) %>% 
+  group_by(group.id_in_subsession, session.code) %>% 
+  group_by(session.code, group.group_id, player.id_in_group) %>% 
+  mutate(cumpay = cumsum(player.payoff)) %>% 
+  ungroup %>% 
+  mutate(is_match = ifelse(group.reported_roll_p1 == group.reported_roll_p2, 1, 0),
+         group.checked = ifelse(is_match == 1, group.checked, NA))
+
+```
+
+Wide Format
+```{r}
+# For this, we separate the dataframes in two, one for the player data that we want to spread, and one for the data that we want to shorten
+# First step: spread the player related data in extra columns
+temp_player_data <- data_long %>% 
+  mutate(player.id_in_group = fct_recode(as.factor(player.id_in_group), "Player1" = "1", "Player2" = "2", "Leader" = "3")) %>% 
+  group_by(session.code, group.group_id, player.id_in_group) %>% 
+  nest(c(player.age, player.gender, player.contribution, mi_int, mi_sym), .key = "value_col") %>% 
+  spread(player.id_in_group, value_col, sep = "_") %>%
+  unnest(.sep = "_") %>% 
+  set_names(~ str_remove(., "player.id_in_group_")) %>% 
+  unique()
+
+# Second step: create a dataframe with non-repeated rows
+temp_to_add <- data_long %>% 
+  select(-contains("participant"), 
+         -contains("player"), 
+         -group.id_in_subsession, 
+         -mi_int, 
+         -mi_sym, 
+         -dospert, 
+         -cumpay, 
+         player.ingame) %>% 
+  unique()
+
+# join both dataframes
+data_wide <- left_join(temp_player_data, temp_to_add, by = c("group.group_id")) %>% 
+  set_names(., ~ str_remove(., "player.") %>% # apply some cosmetics
+              str_remove(., "subsession.") %>% 
+              str_remove(., "group."))
+```
+
+Aggregated
+```{r}
+data_sum <- data_long %>% 
+  group_by(session.code, group.group_id) %>% 
+  summarise(average_team_cheat = mean(group.team_cheated, na.rm = TRUE),
+            average_leader_check = mean(group.checked, na.rm = TRUE),
+            average_contribution = mean(as.numeric(player.contribution)),
+            max_contribution = mean(as.numeric(group.total_contribution)),
+            max_amount = max(cumpay),
+            percent_contribution = average_contribution / max_amount)
+```
+
+
+# time to have some fun!
+```{r}
+data_wide %>% 
+  ggplot(aes(reported_roll_p1, reported_roll_p2)) +
+  geom_point(position = "jitter")
+
+data_wide %>% 
+  ggplot(aes(actual_roll_p1, reported_roll_p1)) +
+  geom_point(position = "jitter")
+
+
+data_wide %>% 
+  ggplot(aes(actual_roll_p2, reported_roll_p2)) +
+  geom_point(position = "jitter")
+
+
+# change over time
+data_wide %>%
+  ggplot(aes(round_number, team_cheated)) +
+  geom_jitter() +
+  geom_smooth(method = "lm")
+
+
+data_wide %>% 
+  ggplot(aes(reported_roll_p1, reported_roll_p2, color = as.factor(checked))) +
+  geom_point(position = "jitter", alpha = 0.5)
+
+
+# checking over time
+data_wide %>%
+  ggplot(aes(round_number, checked)) +
+  geom_jitter() +
+  geom_smooth(method = "lm")
+
+
+data_wide %>% 
+  ggplot(aes(Leader_mi_int, checked)) +
+  geom_jitter() +
+  geom_smooth(method = "lm")
+
+data_wide %>% 
+  ggplot(aes(Player1_mi_int, p1_cheat)) +
+  geom_jitter() +
+  geom_smooth(method = "lm")
+
+
+
+```
+
+
+```{r}
+data_long$
+```
+

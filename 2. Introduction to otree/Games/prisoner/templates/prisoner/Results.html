@@ -1,0 +1,40 @@
+{% extends "global/Page.html" %}
+{% load otree %}
+
+{% block title %}
+    Results
+{% endblock %}
+
+{% block content %}
+
+
+    <p>
+        {% if same_choice %}
+            Both of you chose to <b>
+            {% if my_decision == "Cooperate" %}
+                <font color='#228b22'>{{ my_decision }}</font>.
+            {% else %}
+                <font color='orange'>{{ my_decision }}</font>
+            {% endif %}
+        </b>
+
+        {% else %}
+            {% if my_decision == "Cooperate" %}
+                You chose to <b><font color='blue'>{{ my_decision }}</font></b> but
+                the other participant chose to <b><font color='red'>{{ opponent_decision }}</font></b>.
+            {% else %}
+                You chose to <b><font color='red'>{{ my_decision }}</font></b> but
+                the other participant chose to <b><font color='blue'>{{ opponent_decision }}</font></b>.
+            {% endif %}
+        {% endif %}
+    </p>
+
+    <p>
+        As a result, you earned <b>{{ player.payoff }}</b>.
+    </p>
+
+    {% next_button %}
+
+    {% include Constants.instructions_template %}
+
+{% endblock %}

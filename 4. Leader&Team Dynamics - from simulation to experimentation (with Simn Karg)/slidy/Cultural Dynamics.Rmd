@@ -1,0 +1,249 @@
+---
+title: "Cultural Dynamics"
+output:
+  slidy_presentation:  
+    css: font.css
+header-includes: \usepackage{amsmath}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Wellcome to Slidy!
+
+- Bullet 1
+- Bullet 2
+- Bullet 3
+
+## A "simple" simulation of the game
+
+```{r CoopCor, echo = TRUE}
+CoopCor <- function(n_game,tmax,agent1,agent2,leader){
+  
+  #First, we create the main dataset we are going to export in the end
+  #It is empty, with the right amount of rows and columns
+  #We will add each run of the game to it
+  game <-  as.data.frame(matrix(NA,n_game*tmax,10))
+  colnames(game) <- c("P1_roll","P2_roll", "P1_cheat", "P2_cheat", "check","cheated", 
+                      "payoff","th_payoff","ingame","n_game")
+  
+  #This overarching loop allows to play multiple games at once with 1 run of it being 1 game
+  for (n in 1:n_game){
+    
+    #Then we define a still_in_game variable to identify teams who lost by GREED
+    still_in_game <- 1
+     
+    #Then we can loop in time to play the game
+      for (r in 1:tmax){
+        
+        #To Say where r should be in the dataframe (depend on the game)
+        t = (n-1)*tmax + r
+    
+        
+        ### P1 TURN
+        #We draw between 1 and 6 using sample()
+        game$P1_roll[t] <- sample(c(1:6),1)
+        
+        #If we don't have 6, we can decide to cheat, using agent1 STRATEGY (defined later)
+        game$P1_cheat[t] <- ifelse(game$P1_roll[t]!= 6, agent1(game[1:t-1,]),0)
+        game$P1_roll[t] <- ifelse(game$P1_cheat[t] == 1, 6, game$P1_roll[t])
+        
+        
+        ### P2 TURN (following same process)
+        game$P2_roll[t] <- sample(c(1:6),1)
+        
+        #if we are different from P1 we can decide to cheat, using agent2 STRATEGY
+        game$P2_cheat[t] <- ifelse(game$P2_roll[t]!= game$P1_roll[t], agent2(game[1:t-1,]),0)
+        game$P2_roll[t] <- ifelse(game$P2_cheat[t] == 1, game$P1_roll[t], game$P2_roll[t])
+      
+        #The following only works if they get the same diceroll
+        x <- ifelse(game$P1_roll[t] == game$P2_roll[t],game$P1_roll[t],0)  
+        game$th_payoff[t] <- x
+        
+        
+        #### Leader watching over
+        #Using a STRATEGY to decide to check or not (if agents succeeded only)
+        game$check[t] <- ifelse(x != 0, leader(game[1:t-1,]),0)
+        
+        ### Payoff calculation
+        #First we coarse-grain cheating(we don't need to know who did, just that it happened, and it is only relevant if they get a payoff)
+        game$cheated[t] <- ifelse((game$P1_cheat[t] == 1 | game$P2_cheat[t] == 1) & x != 0, 1,0)
+        #then we can run the equation (defined below)
+        game$payoff[t] <- PayoffEq(x,game$check[t],game$cheated[t],still_in_game)
+        
+        #If a cheat happened, but no one checked, MENACING GAMBLE!!
+        #a bernoulli with 5% chance to return TRUE, wich throws out of the game
+        if(game$check[t] == 0 & game$cheated[t] == 1){
+          if(rbernoulli(1,.05)){
+            still_in_game <- 0}
+          }
+        
+        #To finish, we report if we are still in game or if we lost this turn, and the game we are currently in
+        game$ingame[t] <- still_in_game
+        game$n_game[t] <- n
+      } # this ends the loop for turns
+    } # this ends the loop for games
+  
+  return(game)
+}
+
+#Equation to calculate payoff in synchronous payoff condition
+#It takes in the dice roll value, wether there was a check or not, wether someone cheated or not, and wether the team is still in game or not
+PayoffEq <- function(x,check,cheat,ingame){
+  (x - check*x/2 - check*cheat*x/2)*ingame}
+```
+
+## Defining Strategies 1: Random
+
+```{r, echo = TRUE}
+
+BiasedChoice <- function(rate){
+  # closure
+  strategy <- function(game) {
+    #We use a bernoulli to simulate a choice of 0 or 1 using rate as probability
+    #As bernoulli returns TRUE and FALSE, we need to transform them in integers: 1 and 0
+    return(as.integer(rbernoulli(1,rate)))
+  }
+  return(strategy)
+}
+
+```
+
+## Time for some examples: What's the ideal?
+
+
+
+## 
+
+
+## Defining Strategies 2: Heuristics
+
+Look at how much team is earning and make decision based on this
+```{r, echo = TRUE}
+#Has a memory of N + 1, looking at the mean payoff in a N + 1 window, compare with expectected mean payoff, if higher, check
+N_Cumulative_Mean <- function(N){
+  
+  # closure
+  strategy <- function(game) {
+    #define the range to look for
+    n_prev_rounds = nrow(game)
+    begin_window = max(0, n_prev_rounds-N)
+    
+    #If we just started the game do it at random
+    if (n_prev_rounds < 1) return(rbinom(1,1,0.5))
+    
+    # calculate how much team has earned in the last couple of rounds
+    mean_payoff = mean(game$payoff[begin_window:n_prev_rounds])
+    
+    # this is what people should earn in general:
+    expected_payoff = (1/6)*3.5 
+    
+    # Make a decision: if the mean payoff is higher than expected, check, if not don't
+    strategic_choice = ifelse(mean_payoff > expected_payoff, 1, 0)
+    
+    # special case, if it's exactly on the cusp, do it random
+    strategic_choice = ifelse(mean_payoff == expected_payoff, rbinom(1,1,.5), round(strategic_choice))
+    
+    return(strategic_choice)
+  }
+  return(strategy)
+}
+
+```
+
+But wait, this is very lenient, as checked cheating will be counted as 0 (remember that teams don't get anything when their cheating is discovered). But they still cheated, so we may want to be a bit more grudgy.
+
+```{r, echo = TRUE}
+N_Th_Cumulative_Mean <- function(N){
+  
+  # closure
+  strategy <- function(game) {
+    #define the range to look for
+    n_prev_rounds = nrow(game)
+    begin_window = max(0, n_prev_rounds-N)
+    
+    #If we just started the game do it at random
+    if (n_prev_rounds < 1) return(rbinom(1,1,0.5))
+    
+    mean_payoff = mean(game$th_payoff[begin_window:n_prev_rounds]) # we're taking the theoretic payoff, rather than the actual payoff
+    expected_payoff = (1/6)*3.5 
+    strategic_choice = ifelse(mean_payoff > expected_payoff, 1, 0)
+    strategic_choice = ifelse(mean_payoff == expected_payoff, rbinom(1,1,.5), round(strategic_choice))
+    
+    return(strategic_choice)
+  }
+  return(strategy)
+}
+
+```
+
+
+## Defining Strategies 3: Refining Heuristics
+
+So far, we've been very strict: either you're above the limit or not. But this is probably not a good idea. After all, world is inherently uncertain, and scoring above the expected mean could also be due to chance. Maybe we should be a bit more lenient.... If only we had a way to test whether an event is due to chance or not, given a theoretical distribution...
+
+```{r, echo = TRUE}
+N_Cumulative_Mean_ttest <- function(N){
+  
+  # closure
+  strategy <- function(game) {
+    #define the range to look for
+    n_prev_rounds = nrow(game)
+    begin_window = max(0, n_prev_rounds-N)
+    prev = game$payoff[begin_window:n_prev_rounds]
+   
+    ##A t-test cannot handle less than 2 datapoint to compare, and cannot handle no variance
+    #If we just started the game do it at random until we have a history of at least size 2
+    if (n_prev_rounds < 2) return(rbinom(1,1,0.5))
+    
+    #If all values in the window are the same:
+    #it is only 0s, in which case mean = 0, so don't check
+    #it is only 1 or 2 or..., in which case mean >> 0.58, so check
+    if (length(unique(prev)) == 1) return(as.integer(prev[1] > 0))
+
+    expected_payoff = (1/6)*3.5 
+    # print(expected_payoff)
+    p_check = 1 - t.test(prev,mu = expected_payoff, alternative = "greater")$p.value
+    strategic_choice = as.integer(rbernoulli(1,p_check))
+    
+    return(strategic_choice)
+  }
+  return(strategy)
+}
+```
+
+Again, we can be a bit more grudgy...
+```{r}
+N_Th_Cumulative_Mean_ttest <- function(N){
+  
+  # closure
+  strategy <- function(game) {
+    #define the range to look for
+    n_prev_rounds = nrow(game)
+    begin_window = max(0, n_prev_rounds-N)
+    prev = game$th_payoff[begin_window:n_prev_rounds]
+
+    ##A t-test cannot handle less than 2 datapoint to compare, and cannot handle no variance
+    #If we just started the game do it at random until we have a history of at least size 2
+    if (n_prev_rounds < 2) return(rbinom(1,1,0.5))
+    
+    #If all values in the window are the same:
+    #it is only 0s, in which case mean = 0, so don't check, it's probably fine
+    #it is only 1 or 2 or..., in which case mean >> 0.58, so check, it's suspicious
+    if (length(unique(prev)) == 1) return(as.integer(prev[1] > 0))
+
+    expected_payoff = (1/6)*3.5 
+    p_check = 1 - t.test(prev,mu = expected_payoff, alternative = "greater")$p.value
+    strategic_choice = as.integer(rbernoulli(1,p_check))
+    
+    return(strategic_choice)
+  }
+  return(strategy)
+}
+```
+
+
+## Time for some visualisations

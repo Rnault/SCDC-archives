@@ -1,0 +1,126 @@
+.instructions {
+    margin-bottom: 20px;
+}
+
+@import url('https://fonts.googleapis.com/css?family=Roboto');
+
+
+body {
+     background: linear-gradient(120deg, #bddcff 0%, #ffffff 100%);
+     font-family: 'Roboto', sans-serif;
+       }
+
+.page-header {
+     color: #ffffff;
+     font-weight: bold;
+    text-shadow: 1px 1px 1px #111111 ;
+}
+
+/*.otree-body {
+        text-align:center;
+    }
+/*
+
+
+input[type=radio] {
+  position: static;
+  visibility: hidden;
+  display: none;
+}
+
+label {
+  color: #007bff;
+  cursor: pointer;
+  font-weight: bold;
+  padding: 15px 23px;
+}
+
+input[type=radio]:hover + label {
+    color: #ffffff;
+    background: #007bff;
+    padding: 10px 21px;
+}
+
+input[type=radio]:checked + label{
+    color: #ffffff;
+  background: #59a9ff;
+}
+
+label + input[type=radio] + label {
+    filter: brightness(20%);
+}
+
+.radio-group {
+  display: inline-block;
+  border-radius: 100%;
+  overflow: hidden;
+}
+*/
+
+
+/*input.form-check-input
+{
+-webkit-appearance: none;
+-moz-appearance: none;
+appearance: none;
+display: inline-block;
+position: relative;
+background-color: #f1f3f1;
+color: #000000;
+top: 10px;
+height: 30px;
+width: 30px;
+border: 0;
+border-radius: 50px;
+cursor: pointer;
+margin-right: 7px;
+outline: none;
+}
+.form-check-input:checked::before
+{
+position: absolute;
+font: 13px/1 'Open Sans', sans-serif;
+left: 11px;
+top: 7px;
+content: '\02143';
+transform: rotate(40deg);
+}
+.form-check-input:hover
+{
+background-color: #9dcbf9;
+}
+.form-check-input:checked
+{
+background-color:  #007bff;
+}
+
+.form-check-label {
+color: #007bff;
+}
+
+.face-img {
+     height: 500px ;
+     border-radius: 10%;
+}
+
+.otree-btn-next {
+  cursor: pointer;
+  border: solid 1px #999;
+  border-radius: 30%;
+  transition: all .2s linear;}
+
+  .otree-btn-next:hover{
+    border: solid 4px #777;
+
+  }
+  .otree-btn-next:active{
+    border: solid 8px #111;
+
+  }
+
+.row {
+    text-align: center;
+    margin-left: 100px;
+    margin-right: auto;
+    margin-top: 30px;
+}

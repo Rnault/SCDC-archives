@@ -1,0 +1,74 @@
+---
+title: "Tournament PD"
+author: "Rnault"
+date: "10/17/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Implementation of an easy platform to compare strategies to the Prisonner's Dilemma game.
+
+First, we have to create a bunch of strategies, the prisonner dilemma is simple enough to have 4 possible outcomes:
+-Both cooperate and everyone is happy.
+-Both defect and no one gets anything.
+-One cooperate and get screwed, the other defects and gets an adrenalin high for cheating on someone.
+
+If we want to create a tournament, we have to think that agents will meet multiple time. Optimal strategies should thus be motivated by the history of interaction with a certain individual.
+A simple way to start is to give a memory of one event to our agents.
+
+Having a memory of one implies that we act according to the previous outcome.
+We already defined the 4 possible outcomes: CC, DD, CD, DC  ##distinction between CD and DC is important as in one case, the agent is getting screwed, while he is cheating in the other.
+With 4 outcome possibles, there is 2 potential answers: Cooperating of Defecting.
+
+Thus an agent's strategy can be define by a string of size 4 indicating the answer to take according to what happened in the previous encounter. And because we have to start somewhere, we can add another bit to the string to indicate what move to make on the first encounter (and let's put it in the front for clarity).
+Therefore, an agent with strategy C|CDDC is to read this way:
+(starting with)C | C(if we both did C last time) D(if i got screwed) D(if I cheated on you) and C(if we both defected)
+
+To make it look cool and computer friendly, we can transform that into numerals, where C becomes 1 and D becomes -1. It might seem superficial, but it is actually good for 2 points:
+-Setting up your mind to work with bit representation of problem solving
+-Make a nice equation to calculate pay off instead of a bunch of ifelse statements
+
+Then, we can automatically generate a dataframe of every possible combination, $2^5 = 32$
+
+```{r}
+#We create a vector containing -1 and 1, then we do every combinations of 5 time 0 or 1
+bin <- c(0,1)
+strategies <- expand.grid(bin,bin,bin,bin,bin)
+
+#Let's rename columns for clarity
+colnames(strategies) = c("start","CC","CD","DC","DD")
+#And let's add a few columns to help for later:
+strategies$string <- apply(strategies, 1, function(x)paste(x, collapse='')) #a column defining strategy as a string
+#a column of names relevant to the behaviour of the strategy just to help
+strategies$name = c("All D","Bait All D","All D","Grim Trigger", "All D", "Masochist Trigger","All D", "All C", "FD Swindler", "Swindler", "FD T4T", "T4T", "FD Fighter", "FC Fighter", "Blinder", "All C", "FD Remorse", "FC Remorse", "FD Pavlov", "Pavlov", "FD Tree Frog", "Tree Frog", "Prodigal Son", "All C", "CD looper", "DC looper", "FD Punisher", "Punisher", "FD Rebel", "Rebel", "FD All C", "All C")
+
+```
+
+
+
+
+
+Pay off definition:
+
+T > R > P > S
+and
+2R > T + S
+
+With one opponent
+$fij = {1\over4}(1+si)(1+sj)R+ {1\over4}(1+si)(1???sj)S+ {1\over4}(1???si)(1+sj)T+ {1\over4}(1???si)(1???sj)P$
+
+With all opponent
+$fi =???aij*fij$
+
+```{r}
+
+bin <- c(0,1)
+strategies <- expand.grid(bin,bin,bin,bin)
+
+colnames(strategies) = c("LL","LR","RL","RR")
+
+```
+

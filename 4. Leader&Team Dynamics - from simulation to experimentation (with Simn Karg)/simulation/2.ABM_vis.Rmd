@@ -1,0 +1,307 @@
+---
+title: "ABM power calculator"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+Documentation:
+This takes simulations from the cooperative corruption simulations and plots them.
+
+Simulations depend on CoopCor function in ABM.rmd file
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(gghighlight)
+library(ggridges)
+library(brms)
+require(ggsci)
+# source()
+# Flat Violin shape
+source("https://gist.githubusercontent.com/benmarwick/2a1bb0133ff568cbe28d/raw/fb53bd97121f7f9ce947837ef1a4c65a73bffb3f/geom_flat_violin.R")
+theme_set(theme_bw(base_size = 25,
+                   base_line_size = 1))
+```
+
+############## I. PROTOTYPICAL SCENARIOS ##################
+
+# Read in the data saved
+```{r}
+simulation_files <- list.files("data/sims/sim_plots/")
+scenarios <- list()
+
+for(i in seq_along(simulation_files)){
+  scenarios[[i]] <- read_csv(paste0("data/sims/sim_plots/",simulation_files[i]))
+}
+
+names(scenarios) <- str_remove(simulation_files, ".csv")
+
+
+
+
+scenario_summaries <- list()
+
+for(i in (seq_along(scenarios))){
+  scenario_summaries[[i]] <- assign(paste(names(scenarios)[i], "summary", sep = "_"), scenarios[[i]]) %>% 
+    group_by(n_game) %>%
+    mutate(turnID = row_number()) %>%
+    ungroup()
+  names(scenario_summaries)[i] <- names(scenarios)[i]
+  }
+
+scenario_full <- plyr::ldply(scenario_summaries, data.frame) %>%
+  mutate(is_heuristic = ifelse(.id == "TheoreticalLeader" | .id == "BiasedLeader",1,0))
+
+scenario_comparison <- scenario_full %>%        
+  group_by(turnID,.id) %>%
+  summarise(is_heuristic = mean(cumprod(is_heuristic)),
+            mean_pay = mean(payoff),
+            std = sd(payoff),
+            N = n(),
+            se = std/sqrt(N),
+            lowbeta = mean(qbeta(0.025, payoff + .5, N - payoff + .5)),
+            highbeta = mean(qbeta(0.975, payoff + .5, N - payoff + .5))) %>%
+  ungroup() %>%
+  group_by(.id) %>%
+  mutate(cum_pay = cumsum(mean_pay))
+
+```
+
+##Payoff related plots
+```{r}
+#Plotting mean pay off by round
+(g1 <- scenario_comparison %>% 
+  ggplot(aes(x = turnID, y = mean_pay, color = .id)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(x = turnID, ymin = mean_pay - se, ymax = mean_pay + se, group = .id), alpha =.2, inherit.aes = FALSE) +
+  scale_color_manual(values = ggsci::pal_aaas()(9)) +
+  labs(title = "Mean Payoff by Round (N = 1000)", 
+       x = "Round Number", y = "Mean Payout", color = "Scenario"))
+#ggsave("figures/mean_pay_by_round.png", device = "png", width = 15, height = 7.5)
+
+
+#Plotting mean pay off by round, but highlighting the smart leaders
+g1 +
+  gghighlight(is_heuristic == 1, use_group_by = FALSE, label_key = .id)
+#ggsave("figures/mean_pay_by_round_HL.png", device = "png", width = 15, height = 7.5)
+
+
+#Plotting mean cumulative payoff by round
+(g2 <- scenario_comparison %>% ggplot(aes(x = turnID, y = cum_pay, color = .id)) +
+  geom_line(size = 1) +
+  scale_color_manual(values = ggsci::pal_aaas()(9)) +
+  labs(title = "Mean Cumulative Pay by Round (N = 1000)", 
+       x = "Round Number", y = "Mean Cumulative Payout", color = "Scenario")
+)
+#ggsave("figures/mean_cumpay_by_round.png", device = "png", width = 15, height = 7.5)
+
+#Plotting mean cumulative payoff by round, but highlighting the smart leaders
+g2 +
+  gghighlight(is_heuristic == 1, use_group_by = FALSE, label_key = .id)
+
+#ggsave("figures/mean_cumpay_by_round_HL.png", device = "png", width = 15, height = 7.5)
+
+```
+
+
+## How much money have groups actually made (i.e. when being caught = 0)?
+```{r}
+#We summarise the full dataset
+game_summaries <- scenario_full %>% group_by(.id,n_game) %>%
+  summarise(total_pay = sum(payoff),
+            ingame_dummy = min(cumprod(ingame)),
+            is_heuristic = min(cumprod(is_heuristic))) %>%
+  mutate(actual_pay = ifelse(ingame_dummy == 0, 0, total_pay))
+
+
+###### Raincloud Plot
+#with all scenarios
+game_summaries %>%
+  ungroup() %>%
+  mutate(.id = fct_reorder(.id, desc(actual_pay))) %>%
+  ggplot(aes(x = .id, y = actual_pay, fill = .id)) +
+  geom_flat_violin(position = position_nudge(x = .2, y = 0)) +
+  geom_point(aes(color = .id),position = position_jitter(width = .15), size = .2) +
+  geom_boxplot(width = .1, alpha = 0.5, outlier.shape = NA, show.legend = FALSE) +
+  scale_fill_manual(values = ggsci::pal_aaas()(9)) +
+  scale_color_manual(values = ggsci::pal_aaas()(9)) +
+  labs(title = "Payouts Raincloud Plot", x = "Scenarios", y = "Actual Payouts") +
+  coord_flip() +
+  theme_minimal(base_size = 24) +
+  guides(fill = FALSE, color = FALSE)
+#ggsave("figures/RaincloudPlot_actual_payouts_ALL.png", device = "png", width = 15, height = 10)
+
+#without smart leaders
+game_summaries %>%
+  ungroup() %>%
+  filter(is_heuristic == 0) %>%
+  mutate(.id = fct_reorder(.id, desc(actual_pay))) %>%
+  ggplot(aes(x = .id, y = actual_pay, fill = .id)) +
+  geom_flat_violin(position = position_nudge(x = .2, y = 0)) +
+  geom_point(aes(color = .id),position = position_jitter(width = .15), size = .2) +
+  geom_boxplot(width = .1, alpha = 0.5, outlier.shape = NA, show.legend = FALSE) +
+  scale_fill_manual(values = ggsci::pal_aaas()(9)) +
+  scale_color_manual(values = ggsci::pal_aaas()(9)) +
+  labs(title = "Payouts Raincloud Plot", x = "Scenarios", y = "Actual Payouts") +
+  coord_flip() +
+  theme_minimal(base_size = 24) +
+  guides(fill = FALSE, color = FALSE)
+#ggsave("figures/RaincloudPlot_actual_payouts_no_heuristics.png", device = "png", width = 15, height = 10)
+
+
+####### Simple bar plot
+#with all scenarios
+game_summaries %>%
+  group_by(.id) %>%
+  summarise(mean_actual_pay = mean(actual_pay),
+            N = n(),
+            std = sd(actual_pay),
+            se = std/sqrt(N)) %>%
+  mutate(.id = fct_reorder(.id, desc(mean_actual_pay))) %>%
+  ggplot(aes(x = .id, y = mean_actual_pay, fill = .id)) +
+  geom_bar(stat = "identity") +
+  geom_errorbar(aes(ymin = mean_actual_pay - se, ymax = mean_actual_pay + se), width = 0.3) +
+  scale_fill_manual(values = ggsci::pal_aaas()(9)) +
+  theme(axis.text = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Mean Actual Payouts by Scenario (N = 1000)", fill = "Scenario", x = "Scenarios", y = "Mean Actual Payout" )
+#ggsave("figures/mean_actual_payouts.png", device = "png", width = 15, height = 7.5)
+
+#witohut smart leaders
+game_summaries %>%
+  filter(is_heuristic == 0) %>%
+  group_by(.id) %>%
+  summarise(mean_actual_pay = mean(actual_pay),
+            N = n(),
+            std = sd(actual_pay),
+            se = std/sqrt(N)) %>%
+  mutate(.id = fct_reorder(.id, desc(mean_actual_pay))) %>%
+  ggplot(aes(x = .id, y = mean_actual_pay, fill = .id)) +
+  geom_bar(stat = "identity") +
+  geom_errorbar(aes(ymin = mean_actual_pay - se, ymax = mean_actual_pay + se), width = 0.3) +
+  scale_fill_manual(values = ggsci::pal_aaas()(9)) +
+  theme(axis.text = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Mean Actual Payouts by Scenario (N = 1000)", fill = "Scenario", x = "Scenarios", y = "Mean Actual Payout" )
+#ggsave("figures/mean_actual_payouts_no_heuristics.png", device = "png", width = 15, height = 7.5)
+```
+
+
+############## II. SMART AND ETHICAL LEADERS ##################
+
+# Read in the datasets
+```{r}
+sim_comb_sum <- read.csv("data/sims/leader_heuristic/sim_comb_sum.csv")
+sim_comb <- read.csv("data/sims/leader_heuristic/sim_comb.csv")
+```
+
+About money?
+```{r}
+#The mean cumulative pay:
+#The total money a team makes, averaged over number of games
+
+#mean cumulative pay by round number
+sim_comb_sum %>%
+  ggplot(aes(x = turnID, y = mean_cum_actual_pay, color = bias)) +
+  geom_line(aes(group = bias)) +
+  scale_color_gradient2(low = "green", mid = "yellow", high = "red", midpoint = 0.5) +
+  facet_wrap(~heuristic)
+
+
+# Foregone income (What you are missing on by checking too much)
+sim_comb %>%
+  mutate(foregone_pay = ifelse(check == 1 & cheated == 0, th_payoff - actual_pay, 0)) %>%
+  group_by(bias, heuristic, n_game) %>%
+  mutate(foregone_pay_cum = cumsum(foregone_pay)) %>%
+  group_by(turnID, bias, heuristic) %>%
+  summarise(mean_foregone_pay_cum = mean(foregone_pay_cum)) %>%
+  ggplot(aes(x = turnID, y = mean_foregone_pay_cum, color = as.factor(bias))) +
+  geom_line() +
+  facet_wrap(~ heuristic) +
+  scale_color_manual(values = scales::seq_gradient_pal(low = "green", high = "red")(seq(0,1, length.out = 11))) +
+  labs(x = "Turn Number", y = "Foregone Payout (cumulative)", title = "Foregone pay by unnecessary checks")
+```
+
+What is the state of the games at last round?
+```{r}
+rounds=100
+#Creating a dataframe with data only from last round
+sim_comb_max <- sim_comb_sum %>%
+  filter(turnID == rounds)
+
+
+sim_comb_max %>% ggplot(aes(x = bias, y = mean_cum_actual_pay, fill = heuristic)) +
+  geom_bar(stat = "identity", position = "dodge")
+
+## At last round
+
+## What we have when the game ends
+#actual gains (accounting for failed games) for each cheating bias and heuristic, averaged over the 250 games
+sim_comb_max %>% ggplot(aes(x = bias, y = mean_cum_actual_pay, color = heuristic)) +
+  geom_point() + geom_smooth(method = "lm")
+#total lost games on 250 runs by bias and heuristics
+sim_comb_max %>% ggplot(aes(x = bias, y = sum_lost_game, color = heuristic)) +
+  geom_point() + geom_smooth()
+```
+
+
+Everything about the dynamics between checks and cheats:
+We have 2*2 possibilities
+-A check matched by a cheat: good job!
+-A check without a cheat: you're being too suspicious, you wasted the company's money
+-No check but cheat: you failed at your job
+-No check no cheat: we don't care so much
+```{r}
+#overall checking
+sim_comb_sum %>%
+  ggplot(aes(x = bias, y = sum_checks, color = heuristic)) +
+  geom_point() +
+  geom_smooth()
+#failed checks
+sim_comb_sum %>%
+  ggplot(aes(x = bias, y = sum_unchecked_cheat, color = heuristic)) +
+  geom_point() +
+  geom_smooth()
+#successeful checks
+sim_comb_sum %>%
+  ggplot(aes(x = bias, y = sum_checked_cheat, color = heuristic)) +
+  geom_point() +
+  geom_smooth()
+#unnecessary checks
+sim_comb_sum %>%
+  ggplot(aes(x = bias, y = sum_useless_check, color = heuristic)) +
+  geom_point() +
+  geom_smooth()
+
+###The evolution of checks across runs by bias
+#failed checks
+sim_comb_sum %>%
+  ggplot(aes(x = turnID, y = sum_unchecked_cheat, color = bias)) +
+  geom_line(aes(group = bias)) +
+  scale_color_gradient2(low = "green", mid = "yellow", high = "red", midpoint = 0.5) +
+  facet_wrap(~heuristic)
+
+#succesfull checks
+sim_comb_sum %>%
+  ggplot(aes(x = turnID, y = sum_checked_cheat, color = bias)) +
+  geom_line(aes(group = bias)) +
+  scale_color_gradient2(low = "green", mid = "yellow", high = "red", midpoint = 0.5) +
+  facet_wrap(~heuristic)
+
+#unnecessary checks
+sim_comb_sum %>%
+  ggplot(aes(x = turnID, y = sum_useless_check, color = bias)) +
+  geom_line(aes(group = bias)) +
+  scale_color_gradient2(low = "green", mid = "yellow", high = "red", midpoint = 0.5) +
+  facet_wrap(~heuristic)
+```
+
+It seems that:
+
+On the cumulative payoff
+-With a forgiving leader, any amount of cheating brings better results
+-With a grudgy leader, any amount of cheating brings worst results
+
+When taking into account the failed games (payoff drops to 0 because of GREED and BAD LUCK)
+On the actual cumulative pay off
+-Never cheating still brings the best result
+-Having a grudgy leader leads to a drastic decrease of gains the more cheating happens
+-Having a forgiving leader leads to slight decrease of gains when cheating increases

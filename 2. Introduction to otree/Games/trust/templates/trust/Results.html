@@ -1,0 +1,38 @@
+{% extends "global/Page.html" %}
+{% load otree %}
+
+{% block title %}
+    Results
+{% endblock %}
+
+{% block content %}
+
+    {% if player.role == 'A' %}
+        <p>
+            You were initially <b><font color="blue">endowed with {{ Constants.endowment }} </font></b>.<br>
+            You chose to <b><font color="red">send participant B {{ group.sent_amount }}</font></b>.<br>
+            You <b><font color="#228b22">received {{ group.sent_back_amount }}</font></b>.<br>
+            Therefore, you now have:
+            {{ Constants.endowment }}-{{ group.sent_amount }}+{{ group.sent_back_amount }} = <b>{{ player.payoff }}</b>
+            <br>
+            While participant A has <b>{{ payoff_A }} points</b>
+
+        </p>
+    {% else %}
+        <p>
+            Participant A <b><font color="blue">sent you {{ group.sent_amount }}</font></b>.<br>
+            They were tripled so you <b><font color="#228b22">received {{ tripled_amount }}</font></b>.<br>
+            You chose to <b><font color="red">return {{ group.sent_back_amount }}</font></b>.<br>
+            Therefore, you now have:
+            ({{ tripled_amount }})-({{ group.sent_back_amount }}) = <b>{{ player.payoff }}</b>
+            <br>
+            While participant B has <b>{{ payoff_B }} points</b>
+        </p>
+        .
+    {% endif %}
+
+    <p>{% next_button %}</p>
+
+    {% include Constants.instructions_template %}
+
+{% endblock %}

@@ -1,0 +1,788 @@
+---
+title: "Untitled"
+author: "Rnault"
+date: "3/4/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library('tidyverse')
+```
+
+A simple agent based model of gender biases
+Consider a lifetime of work for a private company. Every year, you have a chance to get promoted to a higher position. However, for some reason, men and women have a slightly different chance to get promoted every step of the way. How does a small difference explodes?
+
+Using probabilities, we can compute a simple ratio for such gender bias:
+p_man/p_woman
+-> for example: If a man has 0.5 chance to get a promotion and a woman 0.40, we have a ratio of 1.25, which means a man is only 0.25 more likely to get promoted than a woman.
+However, if we want to climb the ladder, we have to get promoted more than once. If we assume the successive promotions to be independent, thus the probabilities to remain the same along the way, then the ratio changes in the following p_man^n_promotion / p_woman^n_promotion.
+->Keeping the example above, assuming you become CEO after 15 promotions, we get 0.5^15 / 0.4^15 = 28.4, which means a man is almost 30 times more likely to become CEO than a woman.
+
+Can we simulate this scenario in an Agent Based Modelling (ABM) Framework?
+  -> It would imply a finite population
+Do we get similar results?
+```{r}
+#N = number of agents
+#p_man, p_woman = probability for a man/woman to have a promotion
+Promotion <- function(N,p_man,p_woman){
+#create the dataframe that will hold the data
+game <-  as_tibble(matrix(NA,N,16))
+#each row is an agent
+#each agent has a gender
+#each P variable is binary and represents an opportunity for a promotion in te private sector of employment. The sum of promotions of an agent determines how far it went in the hierarchy of a company (1 promotion = just got employed, 15 promotions = CEO)
+colnames(game) <- c("gender","P1", "P2", "P3", "P4","P5", "P6","P7","P8","P9", "P10", "P11", "P12", "P13", "P14", "P15")
+#we give a random gender to everyone, making sure it is distributed equally (N males == N females)
+  game$gender <- sample(rep(c("M","W"),N/2),N,replace = FALSE)
+  
+  #we loop over each promotion variables, representing a full career of opportunities
+  for (i in 2:16){
+    #promotion is only based on gender (a chance to get one is either p_man or p_woman)
+    game[,i] <- ifelse(game$gender == "M", rbinom(N,1,p_man),rbinom(N,1,p_woman))
+  }
+  
+  #calculate sum of promotions of each agent
+  game$sum <- game %>% 
+    select(-gender) %>% 
+    rowSums()
+  return(game)
+}  
+
+
+
+```
+
+
+```{r}
+#Here a man has 0.5 chance to get promoted while a woman has 0.4, small bias?
+agent <- Promotion(500000,0.5,0.40)
+
+#do we have the right amount of agents of each gender?
+agent %>% 
+  group_by(gender) %>% 
+  count()
+
+#how many agent of each gender ended up becoming CEO?
+bias <- agent %>% 
+  filter(sum >= 15) %>% 
+  group_by(gender) %>% 
+  count()
+print(d)
+#what's the ratio? (NA if there isn't at least 1 CEO of each gender)
+d[1,2] / d[2,2]
+
+#What happens now if we run the simulation multiple times and extract a "CEO distribution" for different ppopulation values?
+
+````
+
+
+
+
+################## MODELS #############################
+/!\ Intro to be written /!\
+
+Refer to:
+https://arxiv.org/abs/1802.07068 (for the original article)
+
+https://medium.com/@hongsupshin/talent-luck-and-success-simulating-meritocracy-and-inequality-with-stochasticity-501e0c1b4969 (for the tweaking)
+The code follows this article's progression, so you can reproduce the similar data and the plots displayed every steps of the article.
+
+Each models builds up on the preceding models.
+The first one presented is the "standard" version. It is the one that is the most faithfull to the original article. It also serves as a template for all further tweaks that we will do. Therefore, it is heavily commented, whereas I only pointed out what changed in the other models.
+
+MAIN MODEL
+```{r}
+### FUNCTION ###
+
+#The role of the model is to explore the interplay between talent and luck in an economic world
+
+#The model makes agents navigate an economic world with their talent. They all start with the same amount of money, 10.
+#Each round, an event can happen to an agent. It can be good or bad.
+#If a good event happens, the agent has to be smart enough to seize the opportunity, in which case it can double his money.
+#If a bad event happens, the agent loses half of his money, no matter what.
+
+#There is 3 parameters to the model:
+#N : the number of agents
+#tmax: how many timestep the model runs
+#p_event: the probability for an event to happen
+
+economy <- function(N,tmax,p_event){
+  #first, we create an empty frame of agents of size N
+
+  
+  #we initialize people's intelligence (normally distributed around 0.6 for 0.1 std)
+  people$talent <- rnorm(N,0.6,0.1)
+  #and capital (everyone gets the same)
+  people$Kapital <- rep(10,N)
+  
+  #we create a matrix of events, each row correspond to an agent from the people's frame
+  #each column represent time (up to tmax)
+  #An event has p_event chance to happen to someone. If it happens, it has equal chance to be a good or a bad event (thus, p_event/2)
+  #A good event is written 1, a bad event event is written -1, and no event is written 0
+  type <- matrix(sample(c(1,-1,0),tmax*N, replace = TRUE, prob = c(p_event/2,p_event/2,(1-p_event))), nrow = N)
+  
+  #we extract the capital of agents in order to change it without modifying its value in the df
+  capital <- people$Kapital
+  #we create a new matrix that will hold people's capital as it evolves 
+  mapital <- matrix(nrow = N, ncol = tmax)
+  
+  #we loop in time to provoke the events
+  #at each time i, we take the column i of the event matrix
+  #we then then change the capital accordingly to the type of event that happened
+  for (i in 1:tmax){
+    #First, if event = 0 (nothing happens), then capital doesn't change
+    capital <- ifelse(type[,i] == 0,
+                      capital,
+                      #If type == 1 (event is good), create random number
+                      ifelse(type[,i] == 1,
+                             ifelse(runif(N) < people$talent,
+                                    capital*2,
+                                    #if random number > talent, capital stays the same
+                            #(You were not smart enough to seize the opportunity)
+                                    capital),
+                            #If type =/= 1 and =/= 0 (it can only be -1), a bad event happens
+                            #You lose half of your capital
+                             capital*0.5))
+    
+    #We add the modifications to the matrix, referencing the economic history of all agents
+    mapital[,i] <- capital
+  }
+
+  #Formating the final dataframe
+  #We add people's financial history to the original df
+  people <- cbind(people,mapital)
+  #We add a column to precise what kind of model we are running (useful later one when we tweak)
+  people$condition <- "standard"
+  #We add a column to precise p_event to compare different p_event values
+  people$p_event <- p_event
+  
+  return(people)
+}
+
+
+#### RUNS ####
+#the standard model at different p_event values
+eco_norm1 <- economy(10000,80,0.001)
+eco_norm2 <- economy(10000,80,0.01)
+eco_norm3 <- economy(10000,80,0.1)
+eco_norm4 <- economy(10000,80,0.5)
+eco_norm5 <- economy(10000,80,0.9)
+#We put everything together to compare
+eco_norm <- rbind(eco_norm1,eco_norm2,eco_norm3,eco_norm4,eco_norm5)
+
+#### PLOTS ####
+#talent distribution
+dens(eco_norm$talent)
+#capital distribution in the end game for p = 0.1
+ggplot(eco_norm3, aes(`80`)) +
+  geom_histogram(binwidth = 20)
+#relation between capital and talent for p = 0.1
+ggplot(eco_norm3, aes(`80`, talent)) +
+  geom_segment(aes(xend=`80`,alpha=0.1), yend=0) +
+    expand_limits(y=0) +
+  geom_point(color='red') +
+  scale_x_continuous(trans='log10')
+
+```
+
+BALANCED LUCK
+Now, you can also escape bad events according to your talent.
+```{r}
+#### FUNCTION ####
+economy_balanced <- function(N,tmax,p_event){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),tmax*N, replace = TRUE,prob = c(p_event/2,p_event/2,(1-p_event))), nrow = N)
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = tmax)
+  
+  for (i in 1:tmax){
+
+    capital <- ifelse(type[,i] == 0,
+                      capital,
+                      ifelse(type[,i] == 1,
+                            ifelse(runif(N) < people$talent,
+                                  capital*2,
+                                  capital),
+                            # /!\ /!\ CHANGE /!\ /!\ #
+                            #However, if capital =/= 0 and capital =/= 1, then create a random number again
+                            ifelse(runif(N) < people$talent,
+                                   #If your talent is higher, you keep your capital standing
+                                   capital,
+                                   capital*0.5)))
+    
+    mapital[,i] <- capital
+}
+
+#Adding a few column for data viz' later on
+people <- cbind(people,mapital)
+people$condition <- "balanced"
+people$p_event <- p_event
+
+return(people)
+}
+
+
+#### RUNS ####
+#the balanced model at different p values
+eco_bal1 <- economy_balanced(10000,80,0.001)
+eco_bal2 <- economy_balanced(10000,80,0.01)
+eco_bal3 <- economy_balanced(10000,80,0.1)
+eco_bal4 <- economy_balanced(10000,80,0.5)
+eco_bal5 <- economy_balanced(10000,80,0.9)
+#big dataframe to compare standard and balanced models
+eco_NvsB <- rbind(eco_norm1,eco_norm2,eco_norm3,eco_norm4,eco_norm5,eco_bal1,eco_bal2,eco_bal3,eco_bal4, eco_bal5)
+
+
+#### PLOTS ####
+ggplot(eco_NvsB, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_wrap(~p_event)
+
+```
+
+TALENT BASED EVENT PAYOFF
+Now results of events depend directly on your talent (capital\*talent for bad luck, capital\*(1+talent) for good luck)
+```{r}
+#### FUNCTION ####
+economy_talent <- function(N,tmax,p_event){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),tmax*N, replace = TRUE,prob = c(p_event/2,p_event/2,(1-p_event))), nrow = N)
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = tmax)
+  
+  for (i in 1:tmax){
+    capital <- ifelse(type[,i] == 0,
+                      capital,
+                      ifelse(type[,i] == 1,
+                            ifelse(runif(N) < people$talent,
+                            # /!\ /!\ CHANGE /!\ /!\ #
+                            #PS: remember, talent should be a number between 0 and 1
+                            
+                            #If you are smart enough, capital(t+1) = capital * 1.talent
+                                  capital*(1+people$talent),
+                                  capital),
+                            ifelse(runif(N) < people$talent,
+                                   capital,
+                            #If you're not smart enough to get out of trouble, capital(t+1) = capital*talent
+                                   capital*people$talent)))
+    mapital[,i] <- capital
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "talent"
+  people$p_event <- p_event
+  
+  return(people)
+}
+
+
+#### RUNS ####
+#the talent model at different p_values
+eco_tal1 <- economy_talent(10000,80,0.001)
+eco_tal2 <- economy_talent(10000,80,0.01)
+eco_tal3 <- economy_talent(10000,80,0.1)
+eco_tal4 <- economy_talent(10000,80,0.5)
+eco_tal5 <- economy_talent(10000,80,0.9)
+#big dataframe to compare balanced and talent models
+eco_BvsT <- rbind(eco_bal1,eco_bal2,eco_bal3,eco_bal4,eco_bal5,eco_tal1,eco_tal2,eco_tal3,eco_tal4,eco_tal5)
+
+
+#### PLOTS ####
+ggplot(eco_BvsT, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_wrap(~p_event)
+```
+
+MERITOCRATIC PAYCHECK
+Now, when nothing happens, your capital still increases each turn. You get a salary.
+The salary is dependent on your talent (w*talent).
+```{r}
+#### FUNCTION ####
+#new variable: w = the base value of the yearly wage for all agents
+economy_meritopay <- function(N,tmax,p_event,w){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),tmax*N, replace = TRUE,prob = c(p_event/2,p_event/2,(1-p_event))), nrow = N)
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = tmax)
+  for (i in 1:tmax){
+    capital <- ifelse(type[,i] == 0,
+                      # /!\ /!\ CHANGE /!\ /!\ #
+                      #If event == 0, you just get your usual salary
+                      #the smarter you are, the higher your salary
+                      #capital(t+1) = capital + wage*talent
+                      capital+w*people$talent,
+                      ifelse(type[,i] == 1,
+                            ifelse(runif(N) < people$talent,
+                                  capital*(1+people$talent),
+                                  capital),
+                            ifelse(runif(N) < people$talent,
+                                   capital,
+                                   capital*people$talent)))
+    mapital[,i] <- capital
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "paycheck"
+  people$p_event <- p_event
+  people$w <- w
+return(people)
+}
+#### RUNS ####
+#the meritocratic paycheck model at different wage
+eco_pay1 <- economy_meritopay(10000,80,0.1,0.01)
+eco_pay2 <- economy_meritopay(10000,80,0.1,0.1)
+eco_pay3 <- economy_meritopay(10000,80,0.1,1)
+eco_pay4 <- economy_meritopay(10000,80,0.1,5)
+eco_pay5 <- economy_meritopay(10000,80,0.1,10)
+eco_pay <- rbind(eco_pay1,eco_pay2,eco_pay3,eco_pay4,eco_pay5)
+
+#the meritocratic paycheck model at different p values
+eco_pay6 <- economy_meritopay(10000,80,0.001,1)
+eco_pay7 <- economy_meritopay(10000,80,0.01,1)
+eco_pay8 <- economy_meritopay(10000,80,0.1,1)
+eco_pay9 <- economy_meritopay(10000,80,0.5,1)
+eco_pay10 <- economy_meritopay(10000,80,0.9,1)
+#big dataframe to compare talent and paycheck model
+eco_TvsP <- rbind(eco_pay6,eco_pay7,eco_pay8,eco_pay9,eco_pay10)
+eco_TvsP <- eco_TvsP %>% 
+  select(-w)
+eco_TvsP <- rbind(eco_TvsP,eco_tal1,eco_tal2,eco_tal3,eco_tal4,eco_tal5)
+
+#### PLOTS ####
+#relation between paycheck and inequality (with fix event rate at 0.1)
+ggplot(eco_pay, aes(talent,`80`)) +
+  geom_point(alpha=0.1, size=0.5, color="blue") +
+  scale_y_continuous(trans='log10')+
+  facet_wrap(~w)
+#comparing the talent based model to the meritocratic paycheck one (with fix w = 1)
+ggplot(eco_TvsP, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~p_event)
+```
+
+INTEREST RATE
+Now, the capital is increased every turn according to an interest rate.
+```{r}
+#### FUNCTION ####
+#new variable: r = interest rate upon which your capital increases every time step
+economy_interest <- function(N,tmax,p_event,w,r){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),tmax*N, replace = TRUE,prob = c(p_event/2,p_event/2,(1-p_event))), nrow = N)
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = tmax)
+  for (i in 1:tmax){
+    
+     # /!\ /!\ CHANGE /!\ /!\ #
+    #add your interest rate at the beginning of a timestep, no matter what
+    capital <- capital + capital*r
+
+    capital <- ifelse(type[,i] == 0,
+                      capital+w*people$talent,
+                      ifelse(type[,i] == 1,
+                            ifelse(runif(N) < people$talent,
+                                  capital*(1+people$talent),
+                                  capital),
+                            ifelse(runif(N) < people$talent,
+                                   capital,
+                                   capital*people$talent)))
+    mapital[,i] <- capital
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "interest"
+  people$p_event <- p_event
+  people$w <- w
+  people$r <- r
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of r with no paycheck w=0
+eco_int1 <- economy_interest(10000,80,0.1,0,0.001)
+eco_int2 <- economy_interest(10000,80,0.1,0,0.01)
+eco_int3 <- economy_interest(10000,80,0.1,0,0.1)
+eco_int4 <- economy_interest(10000,80,0.1,0,0.2)
+eco_int5 <- economy_interest(10000,80,0.1,0,0.25)
+eco_int <- rbind(eco_int1,eco_int2,eco_int3,eco_int4,eco_int5)
+#runs for different values of r with a paycheck of w=1
+eco_int6 <- economy_interest(10000,80,0.1,1,0.001)
+eco_int7 <- economy_interest(10000,80,0.1,1,0.01)
+eco_int8 <- economy_interest(10000,80,0.1,1,0.1)
+eco_int9 <- economy_interest(10000,80,0.1,1,0.2)
+eco_int10 <- economy_interest(10000,80,0.1,1,0.25)
+eco_intW <- rbind(eco_int6,eco_int7,eco_int8,eco_int9,eco_int10)
+#runs for different values of p_events with a paycheck of w=1 and an interest rate of r=0.1
+eco_int11 <- economy_interest(10000,80,0.001,1,0.1)
+eco_int12 <- economy_interest(10000,80,0.01,1,0.1)
+eco_int13 <- economy_interest(10000,80,0.1,1,0.1)
+eco_int14 <- economy_interest(10000,80,0.5,1,0.1)
+eco_int15 <- economy_interest(10000,80,0.9,1,0.1) 
+#big dataframe to compare paycheck and interest model
+eco_PvsI <- rbind(eco_int11,eco_int12,eco_int13,eco_int14,eco_int15)
+eco_PvsI <- eco_PvsI %>% 
+  select(-r)
+eco_PvsI <- rbind(eco_PvsI,eco_pay6,eco_pay7,eco_pay8,eco_pay9,eco_pay10)
+
+#### PLOTS ####
+#different r value without any paycheck
+ggplot(eco_int, aes(talent,`80`)) +
+  geom_point(alpha=0.1, color="blue") +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~r)
+#different r value with paycheck of w=1
+ggplot(eco_intP, aes(talent,`80`)) +
+  geom_point(alpha=0.1, color="blue") +
+  scale_y_continuous(trans='log10')+
+  facet_wrap(~r)
+#comparing the paycheck model to the interest rate one (with fix w = 1 and fix r = 1)
+ggplot(eco_PvsI, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~p_event)
+```
+
+SOCIAL SAFETY NET
+Now, capital cannot decrease below the starting rate
+```{r}
+#### FUNCTION ####
+economy_safenet <- function(N,tmax,p_event,w,r){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),tmax*N, replace = TRUE,prob = c(p_event/2,p_event/2,(1-p_event))), nrow = N)
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = tmax)
+  
+  for (i in 1:tmax){
+    capital <- capital + capital*r
+
+    capital <- ifelse(type[,i] == 0,
+                      capital+w*people$talent,
+                      ifelse(type[,i] == 1,
+                            ifelse(runif(N) < people$talent,
+                                  capital*(1+people$talent),
+                                  capital),
+                            ifelse(runif(N) < people$talent,
+                                   capital,
+                                   capital*people$talent)))
+    
+    # /!\ /!\ CHANGE /!\ /!\ #
+    #If you go below the starting value, we give you enough to get back there
+    capital <- ifelse(capital < 10, 10, capital)
+    
+    mapital[,i] <- capital
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "safety"
+  people$p_event <- p_event
+  people$w <- w
+  people$r <- r
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of p_events with a paycheck of w=1 and an interest rate of r=0.1
+eco_safe1 <- economy_safenet(10000,80,0.001,1,0.1)
+eco_safe2 <- economy_safenet(10000,80,0.01,1,0.1)
+eco_safe3 <- economy_safenet(10000,80,0.1,1,0.1)
+eco_safe4 <- economy_safenet(10000,80,0.5,1,0.1)
+eco_safe5 <- economy_safenet(10000,80,0.9,1,0.1) 
+#big dataframe to compare paycheck and interest model
+eco_SNvsI <- rbind(eco_safe1,eco_safe2,eco_safe3,eco_safe4,eco_safe5, eco_int11,eco_int12,eco_int13,eco_int14,eco_int15)
+
+#### PLOTS ####
+#comparing the paycheck model to the interest rate one (with fix w = 1 and fix r = 1)
+ggplot(eco_SNvsI, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_wrap(~p_event)
+```
+
+RICH GET LUCKIER
+Now, rich agents have a greater chance for an event to be a good event.
+On the other side, poor agents have a harder time getting lucky
+```{r}
+#### FUNCTION ####
+economy_richluck <- function(N,tmax,p_event,w,r){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  # /!\ /!\ BIG CHANGES /!\ /!\ #
+  #Now probabilities of events are dynamic (depend on the previous timesteps) and individual
+  #therefore, we cannot generate all events happenning in time at once
+  # ==> we cannot use the "type" matrix previously used, and need to generate events in the loop
+  #This means worst performances and longer time to run.
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = tmax)
+  for (i in 1:tmax){
+
+    capital <- capital + capital*r
+    
+    #We extract the mean capital and standard deviation before a timestep
+    m <- mean(capital)
+    std <- sd(capital)
+    #We calculate standardized z scores in order to rank everyone's capital according to the mean and standard deviation
+    z_score <- (capital - m) / std
+    #and we calculate everyone's probability of good event using the cumulative probability function. The higher your capital is, the higher your z score is, and the closer to 1 your probability will be. If your capital is the same as the mean capital, your z score is 0 and your probability is 0.5. 
+    prob_luck = case_when(
+      std == 0 ~ 0.5, #if everyone has the same capital, std == 0, therefore it's random
+      TRUE ~ pnorm(z_score))
+    
+    #here, you create the event vector, where probability of good and bad events depends on the individual probability value calculated above
+    event = purrr::map_dbl(prob_luck, ~ sample(c(1,-1,0), 1, replace = TRUE,
+                                         prob = c(p_event * .x, p_event * (1-.x), 1-p_event)))
+
+    #case_when is a simple way to make conditional statements.
+    #Syntax is sexier than using cascades of ifelse. Thanks Malte for pointing it out!
+    capital = case_when(
+      #if no event
+      event == 0 ~ capital+w*people$talent,
+      #if good event
+      event == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(1+people$talent),
+                                  capital),
+      #if bad eevent
+      event == -1 ~ ifelse(runif(N) < people$talent,
+                                  capital,
+                                  capital*people$talent))
+
+    mapital[,i] <- capital
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "richluck"
+  people$p_event <- p_event
+  people$w <- w
+  people$r <- r
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of p_events with a paycheck of w=1 and an interest rate of r=0.1
+eco_richluck1 <- economy_richluck(10000,80,0.001,1,0.1)
+eco_richluck2 <- economy_richluck(10000,80,0.01,1,0.1)
+eco_richluck3 <- economy_richluck(10000,80,0.1,1,0.1)
+eco_richluck4 <- economy_richluck(10000,80,0.5,1,0.1)
+eco_richluck5 <- economy_richluck(10000,80,0.9,1,0.1) 
+#big dataframe to compare richluck and interest model
+eco_RLvsI <- rbind(eco_richluck1,eco_richluck2,eco_richluck3,eco_richluck4,eco_richluck5, eco_int11,eco_int12,eco_int13,eco_int14,eco_int15)
+
+#### PLOTS ####
+#comparing the richluck model to the interest rate one (with fix w = 1 and fix r = 1)
+ggplot(eco_RLvsI, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.5,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~p_event)
+```
+
+TAX SYSTEM MODEL
+Now, a tax system is in place.
+This one is a bit different from the one in the article, in the sense that taxes are calculated on profit, not capital.
+```{r}
+#### FUNCTION ####
+#here, new variable: tax_range -> the range of possible tax you can get, the poorest will have to pay the lowest number, while the richest will have to pay the highest number. 0.1 to 0.4 means you have to pay between 10% and 40% of your profit every round.
+economy_tax <- function(N,tmax,p_event,w,r, tax_range = c(.1, .4)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),
+                         tmax*N,
+                         replace = TRUE, 
+                         prob = c(p_event/2,p_event/2,(1-p_event))), nrow = N)
+
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = tmax)
+  
+  for (i in 1:tmax){
+
+    capital <- capital + capital*r
+    
+    # /!\ /!\ BIG CHANGES /!\ /!\ #
+    #We calculate z scores and cumulative probabilites, as in the previous model
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+    
+    #we calculate the taxes you hae to pay
+    #if probability is very low, your taxes are very close to the lower boundaries
+    #if probability is very high, your taxes are close to the higher boundaries
+    #examples: for tax range of 0.1 - 0.4, if prob = 0.01, tax = 0.1 + 0.3*0.01 = 0.103
+    #for tax range of 0.1 - 0.4, if prob = 0.99, tax = 0.1 + 0.3*0.99 = 0.397
+    tax = tax_range[1] + diff(tax_range) * prob
+    
+    #We calculate people's profit according to the usual system developped in earlier models
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+    
+    #After caculating people's profit for this time step, you add it to their capital while substracting taxes
+    capital = case_when(
+      capital_gains > 0 ~ capital + capital_gains * (1-tax),
+      capital_gains <= 0 ~ capital + capital_gains) #if one's profit is negative, no taxes involved
+    
+    mapital[,i] <- capital
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "tax"
+  people$p_event <- p_event
+  people$w <- w
+  people$r <- r
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of p_events with a paycheck of w=1 and an interest rate of r=0.1
+eco_tax1 <- economy_tax(10000,80,0.001,1,0.1)
+eco_tax2 <- economy_tax(10000,80,0.01,1,0.1)
+eco_tax3 <- economy_tax(10000,80,0.1,1,0.1)
+eco_tax4 <- economy_tax(10000,80,0.5,1,0.1)
+eco_tax5 <- economy_tax(10000,80,0.9,1,0.1) 
+#big dataframe to compare tax and interest model
+eco_TvsI <- rbind(eco_tax1,eco_tax2,eco_tax3,eco_tax4,eco_tax5, eco_int11,eco_int12,eco_int13,eco_int14,eco_int15)
+
+#### PLOTS ####
+#comparing the tax model to the interest rate one (with fix w = 1 and fix r = 1)
+ggplot(eco_TvsI, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~p_event)
+```
+
+WEALTH REDISTRIBUTION MODEL
+In the previous tax model, taxes just disappear...
+Using the taxes collected, you can redistribute wealth equally amongst citizens. Much better than a social safety net.
+```{r}
+#### FUNCTION ####
+economy_distribution <- function(N,tmax,p_event,w,r, tax_range = c(.1, .4)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),
+                         tmax*N,
+                         replace = TRUE, 
+                         prob = c(p_event/2,p_event/2,(1-p_event))), nrow = N)
+
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = tmax)
+  
+  for (i in 1:tmax){
+
+    capital <- capital + capital*r
+    
+    #We calculate z scores, cumulative probabilites and tax rate, as in the previous model
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+    tax = tax_range[1] + diff(tax_range) * prob
+    
+    #We calculate people's profit according to the usual system developped in earlier models
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+    
+    #We calculate people's new capital according to profit and tax rate
+    capital = case_when(
+      capital_gains > 0 ~ capital + capital_gains * (1-tax),
+      capital_gains <= 0 ~ capital + capital_gains)
+    
+    #We calculate the total earnings from the taxes
+    government_tax_earnings = sum(case_when(
+      capital_gains > 0 ~ capital_gains * (tax),
+      capital_gains <= 0 ~ 0))
+    
+    # redistribute the wealth equally! Everyone gets an equal piece of the total government tax earnings
+    capital = capital + government_tax_earnings / N
+    
+    mapital[,i] <- capital
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "tax"
+  people$p_event <- p_event
+  people$w <- w
+  people$r <- r
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of p_events with a paycheck of w=1 and an interest rate of r=0.1
+eco_dist1 <- economy_distribution(10000,80,0.001,1,0.1)
+eco_dist2 <- economy_distribution(10000,80,0.01,1,0.1)
+eco_dist3 <- economy_distribution(10000,80,0.1,1,0.1)
+eco_dist4 <- economy_distribution(10000,80,0.5,1,0.1)
+eco_dist5 <- economy_distribution(10000,80,0.9,1,0.1) 
+#big dataframe to compare distribution and interest model
+eco_TDvsI <- rbind(eco_dist1,eco_dist2,eco_dist3,eco_dist4,eco_dist5, eco_int11,eco_int12,eco_int13,eco_int14,eco_int15)
+
+#### PLOTS ####
+#comparing the distribution model to the interest rate one (with fix w = 1 and fix r = 1)
+ggplot(eco_TDvsI, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~p_event)
+```

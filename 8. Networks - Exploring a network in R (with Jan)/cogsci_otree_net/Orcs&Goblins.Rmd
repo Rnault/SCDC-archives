@@ -1,0 +1,226 @@
+---
+title: "Orcs and Goblins"
+author: "Rnault"
+date: "4/25/2019"
+output: html_document
+---
+
+```{r}
+rdata <- read.csv('~/Desktop/all_apps_wide_2019-04-25.csv', encoding = "UTF-8")
+
+rdata <- rdata %>% 
+  filter(session.code == 'xc72fj2k') %>% 
+  slice(1:26)
+
+edgelist <- rdata %>% 
+  select(contains('friend'), contains('pid')) %>% 
+  gather('friend', 'name', 1:10) %>% 
+  select(name,survey.1.player.pid) %>% 
+  filter(name != "")
+
+edgelist <- as_tibble(edgelist[,c(2,1)])
+colnames(edgelist) <- c("from","to")
+edgelist$from <- as.character(edgelist$from)
+
+a <- as_tibble(unique(edgelist$from))
+b <- as_tibble(unique(edgelist$to))
+uniqnames <- unique(rbind(a,b)) 
+uniqnames <- as_tibble(sort(uniqnames$value))
+
+uniqnames$becomes <- uniqnames$value
+
+```
+
+
+CLEANING NAMES
+```{r}
+uniqnames$becomes[grep("Anders W",uniqnames$becomes)] <- 'Anders W.'
+
+uniqnames$becomes[grep("Annamaya H",uniqnames$becomes)] <- 'Annamaya H.'
+
+uniqnames$becomes[grep("Astrid",uniqnames$becomes)] <- 'Astrid I.'
+
+uniqnames$becomes[grep("Carl-Magnus",uniqnames$becomes)] <- 'Carl-Magnus'
+
+uniqnames$becomes[grep("Emil",uniqnames$becomes)] <- 'Emil R.'
+
+uniqnames$becomes[grep("Fredrik",uniqnames$becomes)] <- 'Fredrik S.'
+
+uniqnames$becomes[grep("Ida",uniqnames$becomes)] <- 'Ida B.'
+
+uniqnames$becomes[grep("Jakob",uniqnames$becomes)] <- 'Jakob M.'
+
+uniqnames$becomes[grep("Jan",uniqnames$becomes)] <- 'Jan K.'
+
+uniqnames$becomes[grep("Linnea",uniqnames$becomes)] <- 'Linnea B.'
+
+uniqnames$becomes[grep("Lisa",uniqnames$becomes)] <- 'Lisa S.'
+
+uniqnames$becomes[grep("Magnus B",uniqnames$becomes)] <- 'Magnus BK'
+
+uniqnames$becomes[grep("Bern",uniqnames$becomes)] <- 'Nanna B'
+
+uniqnames$becomes[grep("Nina",uniqnames$becomes)] <- 'Nina D.'
+
+uniqnames$becomes[grep("Roxana",uniqnames$becomes)] <- 'Roxana P.'
+
+uniqnames$becomes[grep("Sebastian",uniqnames$becomes)] <- 'Sebastian S.'
+
+uniqnames$becomes[grep("Signe K",uniqnames$becomes)] <- 'Signe K.'
+
+uniqnames$becomes[grep("Rahbek",uniqnames$becomes)] <- 'Signe R.'
+
+uniqnames$becomes[grep("Thea",uniqnames$becomes)] <- 'Thea R.'
+
+uniqnames[1,] <- c("","unknown")
+
+```
+
+
+REPLACING NAMES BY ID
+```{r}
+#Clean names
+edgelist$from <- mapvalues(edgelist$from, uniqnames$value, uniqnames$becomes)
+edgelist$to <- mapvalues(edgelist$to, uniqnames$value, uniqnames$becomes)
+
+#prepare anonymising
+namelist <- as_tibble(unique(uniqnames$becomes))
+#Aliases
+namelist$replacement <- c('mor Thunder Ripper',
+'bhan Hell Gasher',
+'brob The Ruthless',
+'bhur The Brute',
+'dorzull Scale Slicer',
+'zharzub Thunder Bruiser',
+'rorzob The Gross',
+'ghugvud Gnome Despoiler',
+'atrar The Coarse',
+'ghozzog The Maniac',
+'ghab The Wretched',
+'bhun The Enormous',
+'goll Cold Cutter',
+'zak Flame Bruiser',
+'zokrud The Feisty',
+'brozzok Kidney Breaker',
+'ograb The Mad',
+'nodgog The Barbaric',
+'guhzuk The Warped',
+'artog Ankle Splitter',
+'lab The Brutal',
+'dab The Vivid',
+'dub The Wild',
+'bhar Chest Lance',
+'dhogzuk The Gross',
+'droggug The Proud',
+'bhurzan Skin Mutilator',
+'bomvub The Grim',
+'orlukk The Smug',
+'nuddug The Crazy',
+'grak The Loyal',
+'nul Elf Slicer',
+'nak Iron Mutilator',
+'dhokrall Elf Gasher',
+'drundul The Brutal',
+'okrug Finger Gasher',
+'rardok Beast Cruncher',
+'dhatok Iron Cruncher',
+'norlag Brass Crusher',
+'grug Smoke Strangler',
+'dan The Arrogant',
+'gak The Cruel',
+'luk The Spiteful',
+'dhuhzun The Putrid',
+'rartal The Barbarian',
+'mogrod The Crooked',
+'lomzod Hell Render')
+
+#Anonymous
+edgelist$from <- mapvalues(edgelist$from, namelist$value, namelist$replacement)
+edgelist$to <- mapvalues(edgelist$to, namelist$value, namelist$replacement)
+
+#Add some edges to have a complete graph
+edgelist[154,] <- c('dhokrall Elf Gasher', 'nul Elf Slicer')
+edgelist[155,] <- c('ghozzog The Maniac', 'dub The Wild')
+
+
+
+## Proto graph
+g <- graph_from_data_frame(edgelist, directed=FALSE, vertices=namelist$replacement)
+as.undirected(g, mode ='collapse')
+
+ggraph(g, 'nicely') +
+  geom_edge_fan(aes(color='red', size = 1), label_dodge = unit(-5, 'mm'))# +
+  #geom_node_point( size = 2, color='blue') +
+  #geom_node_text(aes(label = name),repel = T) +
+  #theme_graph()
+```
+
+Get node attributes
+```{r}
+nodes$survey.1.player.pid <- namelist$replacement
+
+rdata$survey.1.player.pid <- mapvalues(rdata$survey.1.player.pid, uniqnames$value, uniqnames$becomes)
+rdata$survey.1.player.pid <- mapvalues(rdata$survey.1.player.pid,namelist$value, namelist$replacement)
+
+nodes <- rdata[,30:33]
+colnames(nodes) <- c("node","age","gender", "language")
+nodes <- unique(nodes)
+nodes$node <- as.character(nodes$node)
+
+something <- as_tibble(namelist$replacement)
+something$n <- rep(1:47)
+colnames(something) <- c('node','n')
+
+nodes <- join(nodes, something,by='node',type='right')
+```
+
+
+
+```{r}
+g <- graph_from_data_frame(edgelist, directed=TRUE, vertices=nodes)
+as.undirected(g, mode ='collapse')
+
+m <- get.edgelist(g)
+
+
+write.csv(edgelist)
+```
+
+```{r}
+edgelist <- read_csv("edgelist.csv")
+edgelist <- edgelist[,2:3]
+
+
+
+nodes <- read_csv("nodes.csv")
+nodes <- nodes[,2:6]
+
+g <- graph_from_data_frame(edgelist, vertices = nodes, directed = F)
+#protograph
+ggraph(g, 'nicely') +
+  geom_edge_fan(aes(), label_dodge = unit(-1.5, 'mm'), start_cap = circle(2,"mm"),end_cap = circle(2,"mm")) +
+  #geom_node_point( aes(color=gender,size = age)) +
+  geom_node_label(aes(label = n)) +
+  theme_graph()
+
+
+
+#degree
+degree(g) %>% 
+  sort()
+
+mean(degree(g))
+
+dens(degree(g))
+
+#distances
+distances <- as_tibble(distances(g))
+
+mean(distances(g))
+diameter(g)
+```
+
+```{r}
+
+```
+

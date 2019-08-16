@@ -1,0 +1,140 @@
+---
+title: "Imit-Inhib exp analysis"
+author: "Arnault"
+date: "2/12/2018"
+output: html_document
+---
+
+#Let's set up working directory, load library and data
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+setwd("/Users/au209589/Dropbox (Personal)/My courses/2018 - Social and Cultural Dynamics/AssignmentsMaterials/W3 - imit_inhib/data/")
+pacman::p_load(ggplot2,lmerTest,data.table,pastecs,dplyr)
+
+participantList = list.files(".",pattern = ".csv")
+dataList = lapply(participantList, read_csv)
+dataFrame = rbindlist(dataList, fill=TRUE)
+dataFrame <- dataFrame %>% dplyr::rename(Trial=X1)
+dataFrame[,c("X",";Participant;Congruity;Reaction_time;Response;Correctness;Order_number;Finger_Screen")]=NULL
+
+```
+
+
+
+## Checking whether Reaction Time makes sense
+
+```{r}
+#checking RT distribution:
+ggplot(dataFrame,aes(Reaction_time))+geom_histogram()
+#seems like we have some negative RT, hmmm psychic participants or messy data? Let's get rid of it.
+# also, if it takes more than 2 s it's too late (see paper)
+dataFrame= dataFrame %>% subset(Reaction_time >= 0.2 & Reaction_time <= 2)
+
+#checking RT distribution again:
+ggplot(dataFrame,aes(Reaction_time))+geom_histogram()
+#Nice long tail! But it seems that we also have some outliers, could they be responsible for the aspect of the distribution? If we have normally distributed data, the number of datapoints over the mean + 3 standard deviations should be really small (<1%), let's check:
+meanRT = mean(dataFrame$Reaction_time, na.rm = TRUE)
+sdRT = sd(dataFrame$Reaction_time, na.rm = TRUE)
+nOutliers = length(dataFrame$Reaction_time[dataFrame$Reaction_time > meanRT+3*sdRT])
+OutlierRatio = (nOutliers/length(dataFrame$X))*100
+#let's get rid of them:
+dataFrame= dataFrame %>% subset(Reaction_time <= meanRT+3*sdRT)
+
+#let's log transform the data and check again.
+dataFrame$logRT = log(dataFrame$Reaction_time)
+ggplot(dataFrame,aes(logRT))+geom_histogram()
+
+#some descriptive stat's for it:
+round(stat.desc(dataFrame$Reaction_time, basic=FALSE, norm=TRUE),3) #gives us info' about our distribution
+#normtest.p<0.05 indicates that we are significantely different from a normal distribution
+#skewness value indicates positive skew (significant with skew.SE>1): asymmetry with higher density of low values -> long tail towards high values
+#kurtosis value inform us on the ditribution of the skew (significant with kurtosis.SE>1)
+##### => The transformation compressed the data and reduced the tail, but still not normally distributed
+
+```
+
+## Checking whether correctness makes sense
+
+```{r}
+#let's count correct answers and group them by Participant - Condition (Congruity) - Expected Answer (Order_Finger)
+# => Will make it easier to analyse accuracy and effect of condition on accuracy, getting a continuous value for correctness
+correctnessFrame = dataFrame %>%
+  group_by(Participant, Congruity,Order_number) %>%
+  dplyr::summarise(Number_correct=sum(Correctness),totalN=n())
+
+#Let's check the distribution
+ggplot(correctnessFrame,aes(Number_correct))+geom_histogram()
+#Wow! Clearly, the task wasn't easy for everyone. Some lefties not reading the instructions properly?
+
+ggplot(dataFrame,aes(Correctness))+geom_bar()+facet_wrap(~Participant)
+ggplot(dataFrame,aes(Congruity,Reaction_time))+geom_boxplot()
+
+# Let's find out how many and exclude them
+
+Misunderstandings=unique(correctnessFrame$Participant[(correctnessFrame$Number_correct/correctnessFrame$totalN)<.5])
+
+dataFrame=subset(dataFrame,!(Participant %in% Misunderstandings))
+
+# Let's check the distribution again
+correctnessFrame = dataFrame %>%
+  group_by(Participant, Congruity,Order_number) %>%
+  dplyr::summarise(Number_correct=sum(Correctness),totalN=n())
+
+ggplot(correctnessFrame,aes(Congruity,Number_correct/totalN))+geom_bar(stat="identity")
+#Let's check the distribution
+ggplot(correctnessFrame,aes(Number_correct))+geom_histogram()
+
+# hmm still an outlier, let's remove it
+dataFrame=subset(dataFrame,Participant %in% correctnessFrame$Participant[correctnessFrame$totalN>1])
+
+
+```
+
+
+
+
+#Now is time for some modelling
+
+```{r}
+
+ggplot(dataFrame,aes(Congruity,as.numeric(Correctness)))+geom_bar(stat="identity")
+ggplot(dataFrame,aes(Congruity,Reaction_time))+geom_violin()+facet_grid(.~Correctness)
+
+#We want to check if processing (RT) is affected by Congruity (Yes -> imitation ; No -> inhibition)
+model1 = lmer(Reaction_time~Congruity + (1+Congruity|Participant),dataFrame,control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+summary(model1)
+#Taking into account how boring / tiring it is to do the task 120 times:
+model2 = lmer(Reaction_time~Congruity  *Trial+  (1+Trial*Congruity|Participant),dataFrame,control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+summary(model2)
+#Taking into account the finger:
+model3 = lmer(Reaction_time~Congruity  +Order_number+  (1+Order_number+Congruity|Participant),dataFrame,REML=F,control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+summary(model3)
+
+model4 = glmer(Reaction_time~Congruity  +Order_number+  (1+Order_number+Congruity|Participant),dataFrame,family=gaussian(link=log),control = glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+summary(model4)
+
+#We want to check if performance (Correctness) is affected by Congruity (Yes -> imitation ; No -> inhibition)
+
+```
+
+#plotting the results:
+
+```{r}
+#general plot:
+ggplot(dataFrame, aes(x=Congruity,y=Reaction_time))+ geom_boxplot()
+ggplot(dataFrame, aes(x=Congruity,y=Reaction_time))+ geom_violin()
+
+#and by participant:
+ggplot(dataFrame, aes(x=Participant,y=Reaction_time, color=Congruity))+ geom_boxplot()
+#a simpler visualisation of the effect by turning it around (loosing info' though):
+ggplot(dataFrame, aes(x=Reaction_time,y=Participant, color=Congruity))+ geom_boxplot()
+
+```
+
+
+#Some bonus:
+
+```{r}
+
+```

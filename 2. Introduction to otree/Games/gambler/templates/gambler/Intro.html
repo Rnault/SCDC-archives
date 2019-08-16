@@ -1,0 +1,13 @@
+{% extends "global/Page.html" %}
+{% load staticfiles otree %}
+
+{% block title %}
+    Basic Info'
+{% endblock %}
+
+{% block content %}
+    {% formfield player.name label="name" %}
+    {% formfield player.age label="age" %}
+    {% formfield player.sex label="sex" %}
+    {% next_button %}
+{% endblock %}

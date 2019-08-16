@@ -1,0 +1,15 @@
+{% extends "global/Page.html" %}
+{% load staticfiles otree %}
+
+{% block title %}
+    Drawing
+{% endblock %}
+
+{% block content %}
+    <p>
+        you have {{b}} blue balls and {{r}} red balls in your hand.
+    </p>
+    {% formfield player.firstChoice label="What's your guess for the one to come?" %}
+    {% next_button %}
+
+{% endblock %}

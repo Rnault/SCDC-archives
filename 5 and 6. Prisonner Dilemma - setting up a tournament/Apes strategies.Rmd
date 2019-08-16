@@ -1,0 +1,138 @@
+---
+title: "Wild Mind Strategies"
+author: "Rnault"
+date: "11/6/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+```
+
+The game itself
+```{r}
+MatchingPennies <- function(n, strategies){
+  game <- as.data.frame(matrix(NA,n,4))
+  colnames(game) <- c("P1","P2","po1","po2")
+  
+  for (round in 1:n){
+    # print(paste("round", round))
+    # if efficiency is a problem, we could just pass in the index instead of copying the game state        until now
+    game$P1[round] <- strategies[[1]](game[1:round-1,], 1)
+    game$P2[round] <- strategies[[2]](game[1:round-1,], 2)
+    
+    ifelse(game$P1[round]==game$P2[round], game$po1[round]<-1, game$po1[round]<-0)
+    game$po2[round] <- 1- game$po1[round]
+    }
+  game
+}
+```
+
+Some strategies with closure
+```{r}
+###########################   SET RULES, Don't use any info' from the game
+#Always chooses 1 or 0
+FixedChoice <- function(choice){
+  # closure
+  strategy <- function(game, opponent) {
+    choice
+  }
+  return(strategy)
+}
+
+#Has a bias called rate to choose 1
+BiasedChoice <- function(rate){
+  # closure
+  strategy <- function(game, opponent) {
+    #We use a bernoulli to simulate a choice of 0 or 1 using rate as probabilit
+    #As bernoulli returns TRUE and FALSE, we need to transform them in integers: 1 and 0
+    return(as.integer(rbernoulli(1,rate)))
+  }
+  return(strategy)
+}
+
+
+FixedList <- function(list){
+  # closure
+  strategy <- function(game, opponent) {
+    list[(nrow(game)+1)]
+  }
+  return(strategy)
+}
+
+###########################   INFORMED RULES, Use info' from the game
+#Self-Information strategy
+NinARow <- function(N, theta){
+  # closure
+  strategy <- function(game, whoami) {
+    #variables that will help keeping track of the position
+    n_prev_rounds = nrow(game)
+    #print(n_prev_rounds)
+    begin_window = max(0, n_prev_rounds-N)
+    
+    #initiating the game with a set
+    if (n_prev_rounds == 0) return(rbinom(1,1,0.5))
+    if (n_prev_rounds != N + 1 & n_prev_rounds < N + 1) return(game[n_prev_rounds,whoami])
+    
+    #look at your N playing history
+    #if mean == 1 or mean == 0, play the opposite of that
+    #Otherwise keep doing the same as last time
+    switch_factor = mean(game[begin_window:n_prev_rounds,whoami])
+    #print(switch_factor)
+    strategic_choice = ifelse(switch_factor == 1 | switch_factor == 0, (1 - switch_factor), game[n_prev_rounds,whoami])
+    return(ifelse(rbernoulli(1,theta[1+round(switch_factor)]),
+                  strategic_choice, 
+                  rbinom(1,1,0.5)))
+  }
+  return(strategy)
+}
+
+#Shared Information strategy (with same weight of info' through time)
+# N = how many recent rounds taken into consideration (N=0 corresponds to 1 round)
+# theta = vector of two probabilities: c(bias_leave, bias_stay)
+N_Cumulative_Mean <- function(N, theta){
+  
+  # closure
+  strategy <- function(game, whoami) {
+    opponent = 3 - whoami
+    n_prev_rounds = nrow(game)
+    begin_window = max(0, n_prev_rounds-N)
+    
+    # print(game[begin_window:n_prev_rounds,])
+    if (n_prev_rounds < 1) return(rbinom(1,1,0.5))
+    
+    prob_stay = mean(game[begin_window:n_prev_rounds,2+whoami])
+    #print(prob_stay)
+    most_picked = mean(game[begin_window:n_prev_rounds,whoami])
+    print(most_picked)
+    strategic_choice = ifelse(prob_stay > .5, most_picked, 1-most_picked)
+    strategic_choice = ifelse(prob_stay == .5, rbinom(1,1,.5), round(strategic_choice))
+    
+    return(ifelse(rbernoulli(1,theta[1+round(prob_stay)]),
+                  strategic_choice, 
+                  rbinom(1,1,0.5)))
+  }
+  return(strategy)
+}
+```
+
+```{r}
+game = MatchingPennies(15,c(N_Cumulative_Mean(10,c(1,1)), FixedList(game$P1)))
+game
+```
+
+Strategies without closure (Maybe easier for teaching)
+```{r}
+#Fixed Choice
+FixedChoice_1 <- function(game, opponent) {
+    1
+}
+
+FixedChoice_0 <- function(game, opponent) {
+    0
+  }
+```
+
+```{r}
+
+```
